@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TagClawX · Agent Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260327g" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════ HEADER ══ -->
+<header id="header">
+  <div class="header-left">
+    <span class="logo">🐾 TagClawX</span>
+    <span class="subtitle">Agent Dashboard</span>
+  </div>
+  <div class="header-center">
+    <div class="tas-big">
+      <span class="label">TAS</span>
+      <span id="tas-total" class="value">—</span>
+    </div>
+    <div class="tas-sub">
+      <span class="muted">social</span> <span id="tas-social">—</span>
+      &nbsp;·&nbsp;
+      <span class="muted">trade</span> <span id="tas-trade">—</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="agent-pills">
+      <span class="pill" id="pill-main">main</span>
+      <span class="pill" id="pill-bookmarker">bookmarker</span>
+      <span class="pill" id="pill-trader">trader</span>
+    </div>
+    <div id="clock" class="clock muted">—</div>
+    <button id="refresh-btn" onclick="fetchAll()">↻ Refresh</button>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════ MAIN GRID ══ -->
+<main class="grid">
+
+  <!-- ── Main Agent ── -->
+  <section class="card" id="main-panel">
+    <h2 class="card-title">Main Agent</h2>
+
+    <div class="row">
+      <div class="metric-block">
+        <div class="metric-label">OP</div>
+        <div class="metric-value" id="main-op">—</div>
+        <div class="progress-bar"><div class="progress-fill ok" id="bar-op"></div></div>
+      </div>
+      <div class="metric-block">
+        <div class="metric-label">VP</div>
+        <div class="metric-value" id="main-vp">—</div>
+        <div class="progress-bar"><div class="progress-fill ok" id="bar-vp"></div></div>
+      </div>
+      <div class="metric-block">
+        <div class="metric-label">Mode</div>
+        <div id="main-mode-badge" class="badge">—</div>
+      </div>
+    </div>
+
+    <div class="section-label">TAS Components</div>
+    <div class="row compact">
+      <div class="kv"><span class="k">TAS_social</span><span class="v mono" id="main-tas-social">—</span></div>
+      <div class="kv"><span class="k">TAS_trade</span><span class="v mono" id="main-tas-trade">—</span></div>
+      <div class="kv"><span class="k">TAS_total</span><span class="v mono bold" id="main-tas-total">—</span></div>
+    </div>
+    <div class="tas-history-head muted small">Recent cycles</div>
+    <div id="main-tas-history" class="tas-history-grid"></div>
+
+    <div class="section-label">Last Decision</div>
+    <div id="main-decision" class="text-block muted">—</div>
+
+    <div class="section-label">Social Intent</div>
+    <div id="main-social-intent" class="list-block">—</div>
+  </section>
+
+  <!-- ── Bookmarker Agent ── -->
+  <section class="card" id="bookmarker-panel">
+    <h2 class="card-title">Bookmarker Agent</h2>
+
+    <div class="row compact">
+      <div class="kv"><span class="k">X Sync</span><span id="bm-sync-status" class="badge sm">—</span></div>
+      <div class="kv"><span class="k">Last Sync</span><span class="v mono" id="bm-sync-at">—</span></div>
+      <div class="kv"><span class="k">Mode</span><span id="bm-mode-badge" class="badge sm">—</span></div>
+    </div>
+
+    <div class="section-label">Topic Brief</div>
+    <div id="bm-headline" class="text-block">—</div>
+    <div id="bm-keywords" class="tags-row"></div>
+
+    <div class="section-label">Content Candidates</div>
+    <div id="bm-cands-count" class="muted small">—</div>
+    <div id="bm-cands-list" class="list-block">—</div>
+  </section>
+
+  <!-- ── Trader Agent ── -->
+  <section class="card" id="trader-panel">
+    <h2 class="card-title">Trader Agent</h2>
+
+    <div class="row compact">
+      <div class="kv"><span class="k">TAS_trade</span><span class="v mono bold" id="trader-tas">—</span></div>
+      <div class="kv"><span class="k">Mode</span><span id="trader-mode-badge" class="badge sm">—</span></div>
+      <div class="kv"><span class="k">Risk</span><span id="trader-risk-badge" class="badge sm">—</span></div>
+    </div>
+
+    <div class="row-panels">
+      <div class="half-panel">
+        <div class="section-label">Wallet Balances</div>
+        <div id="trader-balances" class="list-block">—</div>
+      </div>
+      <div class="half-panel">
+        <div class="section-label">Claimable Rewards</div>
+        <div id="trader-rewards" class="list-block">—</div>
+      </div>
+    </div>
+
+    <div class="section-label">Risk Flags</div>
+    <div id="trader-risk-flags" class="list-block muted small">—</div>
+  </section>
+
+</main>
+
+<!-- ═══════════════════════════════════════════ LOWER PANELS ══ -->
+<section id="lower-panels">
+  <section id="timeline-section" class="lower-panel">
+    <h2 class="section-heading">Timeline <span id="timeline-count" class="muted small"></span></h2>
+    <div id="timeline-list" class="timeline"></div>
+  </section>
+
+  <section id="agent-graph-section" class="lower-panel">
+    <h2 class="section-heading">Agent Collaboration Graph</h2>
+    <div class="agent-graph-container card-shell">
+      <svg id="agent-graph-svg" viewBox="0 0 560 360" aria-label="Agent collaboration graph"></svg>
+      <div id="agent-graph-tooltip" class="graph-tooltip hidden"></div>
+    </div>
+    <div id="agent-graph-legend" class="graph-legend"></div>
+  </section>
+
+  <section id="feedback-loop-section" class="lower-panel">
+    <h2 class="section-heading">Agent Feedback Loop</h2>
+    <div class="card-shell feedback-loop-container">
+      <svg id="feedback-loop-svg" viewBox="0 0 560 420" width="100%" aria-label="Agent Feedback Loop Visualization">
+        <defs>
+          <marker id="fl-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+            <polygon points="0 0, 7 3.5, 0 7" fill="rgba(255,255,255,0.45)"/>
+          </marker>
+          <!-- Path definitions for animated dots -->
+          <path id="fl-path-m2b" d="M 280 116 Q 120 180 130 296" fill="none"/>
+          <path id="fl-path-b2m" d="M 130 296 Q 120 180 280 244" fill="none"/>
+          <path id="fl-path-m2t" d="M 280 116 Q 440 180 430 296" fill="none"/>
+          <path id="fl-path-t2m" d="M 430 296 Q 440 180 280 244" fill="none"/>
+        </defs>
+
+        <!-- ── Edges ── -->
+        <!-- main → bookmarker -->
+        <path d="M 280 116 Q 120 180 130 296" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#fl-arrow)"/>
+        <rect x="137" y="185" width="86" height="16" rx="4" fill="rgba(13,17,23,0.8)"/>
+        <text x="180" y="197" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.55)">TAS_social</text>
+
+        <!-- bookmarker → main -->
+        <path d="M 130 296 Q 120 180 280 244" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#fl-arrow)"/>
+        <rect x="116" y="238" width="110" height="16" rx="4" fill="rgba(13,17,23,0.8)"/>
+        <text x="171" y="250" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.55)">topic-brief</text>
+
+        <!-- main → trader -->
+        <path d="M 280 116 Q 440 180 430 296" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#fl-arrow)"/>
+        <rect x="337" y="185" width="106" height="16" rx="4" fill="rgba(13,17,23,0.8)"/>
+        <text x="390" y="197" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.55)">treasury-policy</text>
+
+        <!-- trader → main -->
+        <path d="M 430 296 Q 440 180 280 244" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#fl-arrow)"/>
+        <rect x="334" y="238" width="106" height="16" rx="4" fill="rgba(13,17,23,0.8)"/>
+        <text x="387" y="250" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.55)">reward-status</text>
+
+        <!-- ── Animated dots ── -->
+        <circle r="4" fill="#14b8a6" opacity="0.9">
+          <animateMotion dur="3.5s" begin="0s" repeatCount="indefinite"><mpath href="#fl-path-m2b"/></animateMotion>
+        </circle>
+        <circle r="4" fill="#58a6ff" opacity="0.9">
+          <animateMotion dur="4s" begin="0.8s" repeatCount="indefinite"><mpath href="#fl-path-b2m"/></animateMotion>
+        </circle>
+        <circle r="4" fill="#f0a500" opacity="0.9">
+          <animateMotion dur="4.5s" begin="0.3s" repeatCount="indefinite"><mpath href="#fl-path-m2t"/></animateMotion>
+        </circle>
+        <circle r="4" fill="#f97316" opacity="0.9">
+          <animateMotion dur="3s" begin="1.2s" repeatCount="indefinite"><mpath href="#fl-path-t2m"/></animateMotion>
+        </circle>
+
+        <!-- ── Node: main (top-center) ── -->
+        <rect x="225" y="70" width="110" height="72" rx="10" fill="rgba(255,255,255,0.06)" stroke="#00d26a" stroke-width="1.5"/>
+        <rect x="225" y="70" width="110" height="4" rx="4" fill="#00d26a" opacity="0.8"/>
+        <text x="280" y="94" text-anchor="middle" font-size="13" font-weight="bold" fill="white">main</text>
+        <text x="280" y="110" text-anchor="middle" font-size="10" fill="#00d26a" font-weight="500">心跳主脑</text>
+        <text x="280" y="126" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.45)">Orchestrator</text>
+
+        <!-- ── Node: bookmarker (bottom-left) ── -->
+        <rect x="75" y="296" width="110" height="72" rx="10" fill="rgba(255,255,255,0.06)" stroke="#58a6ff" stroke-width="1.5"/>
+        <rect x="75" y="296" width="110" height="4" rx="4" fill="#58a6ff" opacity="0.8"/>
+        <text x="130" y="320" text-anchor="middle" font-size="13" font-weight="bold" fill="white">bookmarker</text>
+        <text x="130" y="336" text-anchor="middle" font-size="10" fill="#58a6ff" font-weight="500">文曲星</text>
+        <text x="130" y="352" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.45)">Content Curator</text>
+
+        <!-- ── Node: trader (bottom-right) ── -->
+        <rect x="375" y="296" width="110" height="72" rx="10" fill="rgba(255,255,255,0.06)" stroke="#f0a500" stroke-width="1.5"/>
+        <rect x="375" y="296" width="110" height="4" rx="4" fill="#f0a500" opacity="0.8"/>
+        <text x="430" y="320" text-anchor="middle" font-size="13" font-weight="bold" fill="white">trader</text>
+        <text x="430" y="336" text-anchor="middle" font-size="10" fill="#f0a500" font-weight="500">财神</text>
+        <text x="430" y="352" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.45)">Treasury</text>
+
+        <!-- ── Legend ── -->
+        <circle cx="16" cy="404" r="4" fill="#14b8a6" opacity="0.8"/>
+        <text x="26" y="408" font-size="9" fill="rgba(255,255,255,0.35)">Animated dots = live data flow between agents</text>
+      </svg>
+    </div>
+  </section>
+</section>
+
+<div id="error-bar" class="error-bar hidden"></div>
+
+<script src="/static/app.js?v=20260327g"></script>
+</body>
+</html>
