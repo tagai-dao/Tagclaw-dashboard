@@ -120,6 +120,11 @@ html, body {
   font-size: .75rem;
 }
 
+.header-actions {
+  display: flex;
+  gap: .4rem;
+}
+
 #refresh-btn {
   background: none;
   border: 1px solid var(--border);
@@ -137,12 +142,50 @@ html, body {
   background: rgba(88,166,255,.08);
 }
 
+.lang-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.lang-seg {
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  padding: .2rem .55rem;
+  cursor: pointer;
+  font-size: .75rem;
+  font-family: var(--mono);
+  transition: background .15s, color .15s;
+  line-height: 1;
+}
+
+.lang-seg:last-child {
+  border-right: none;
+}
+
+.lang-seg:hover {
+  background: rgba(88,166,255,.08);
+  color: var(--accent);
+}
+
+.lang-seg.active {
+  background: rgba(88,166,255,.18);
+  color: var(--accent);
+}
+
 /* ── Grid ── */
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
   padding: 1rem 1.5rem;
+}
+
+@media (max-width: 1300px) {
+  .grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 900px) {
@@ -295,6 +338,15 @@ html, body {
 .list-item .item-right { font-family: var(--mono); font-size: .75rem; white-space: nowrap; color: var(--muted); }
 .list-item .item-title { font-size: .78rem; color: var(--text); word-break: break-word; }
 .list-item .item-sub   { font-size: .7rem; color: var(--muted); }
+
+.dev-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.dev-link:hover {
+  text-decoration: underline;
+}
 
 /* ── Tags ── */
 .tags-row {
@@ -678,3 +730,22 @@ html, body {
 .wallet-pos-high .item-right { color: var(--ok); }
 .wallet-pos-medium .item-right { color: var(--warn); }
 .wallet-pos-low .item-right { color: #79c0ff; }
+
+/* ── Dev Dispatch (鲁班) links ── */
+.dev-link {
+  display: inline-block;
+  font-size: .75rem;
+  font-family: var(--mono);
+  color: var(--accent);
+  text-decoration: none;
+  padding: .1rem .35rem;
+  border: 1px solid rgba(88, 166, 255, .2);
+  border-radius: 3px;
+  background: rgba(88, 166, 255, .06);
+  transition: background .15s, border-color .15s;
+}
+
+.dev-link:hover {
+  background: rgba(88, 166, 255, .14);
+  border-color: rgba(88, 166, 255, .4);
+}

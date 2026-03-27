@@ -1,10 +1,259 @@
 /* TagClawX Dashboard — app.js */
 'use strict';
 
+// ── i18n ───────────────────────────────────────────────────────────────────
+const I18N = {
+  zh: {
+    subtitle: '智能体看板',
+    refresh: '↻ 刷新',
+    'tas-social-label': '社交',
+    'tas-trade-label': '交易',
+    'panel-main': '主智能体',
+    'label-op': 'OP',
+    'label-vp': 'VP',
+    'label-mode': '模式',
+    'section-tas': 'TAS 组件',
+    'recent-cycles': '最近周期',
+    'section-last-decision': '最新决策',
+    'section-social-intent': '社交意图',
+    'panel-bookmarker': '文曲星智能体',
+    'label-x-sync': 'X 同步',
+    'label-last-sync': '上次同步',
+    'section-topic-brief': '话题摘要',
+    'section-content-candidates': '内容候选',
+    'panel-trader': '财神智能体',
+    'label-risk': '风险',
+    'section-wallet': '钱包余额',
+    'section-rewards': '可领奖励',
+    'section-risk-flags': '风险标志',
+    'section-timeline': '时间轴',
+    'section-graph': '智能体协作图',
+    'section-feedback': '智能体反馈循环',
+    'panel-dev': '鲁班 / Claude 调度',
+    'label-status': '状态',
+    'label-completed-at': '完成时间',
+    'section-built-tools': '已开发的软件 / 工具',
+    'section-result-summary': '结果摘要',
+    'section-files-changed': '改动文件',
+    'section-result-links': '结果链接',
+    'built-dashboard': 'TagClaw 仪表板',
+    'built-website': 'TagClaw 网站',
+    'built-follow': '关注系统',
+    'latest-deliverable': '最新交付物',
+    'live-dashboard': '在线仪表板',
+    'github-repo': 'GitHub 仓库',
+    'no-links': '暂无链接',
+    'no-dev-result': '暂无鲁班交付结果',
+    'no-data': '无数据',
+    'no-tas-history': '暂无 TAS 历史',
+    'no-actions': '无动作',
+    'candidates-unit': '个候选',
+    'no-candidates': '无候选',
+    'total-value': '总价值',
+    'portfolio-share': '组合占比',
+    'no-balance': '无余额数据',
+    'no-rewards': '无可领奖励',
+    'no-risk-flags': '无风险标记',
+    'no-timeline': '无时间轴数据',
+    'fetch-error': '获取错误：',
+    'legend-data': '数据 / 运行输出',
+    'legend-command': '指令 / 任务派发',
+    'legend-pulse': '最近活跃节点',
+    'tooltip-status': '状态',
+    'tooltip-last-update': '上次更新',
+    'tooltip-flows': '流向',
+    'node-bm-role': '内容同步',
+    'node-bm-d1': '同步 X bookmarks / tweets',
+    'node-bm-d2': '输出 topic-brief / content-candidates',
+    'node-bm-d3': '提供 TAS_social',
+    'node-trader-role': '资金管理',
+    'node-trader-d1': '监控 wallet / rewards',
+    'node-trader-d2': '评估 TAS_trade',
+    'node-trader-d3': '输出 risk status',
+    'node-main-role': '总调度',
+    'node-main-d1': '汇总 3 条链路',
+    'node-main-d2': '计算 TAS',
+    'node-main-d3': '做发帖 / 策展 / 保守决策',
+    'node-dev-role': 'Claude 调度',
+    'node-dev-d1': '读取 dev task.json',
+    'node-dev-d2': '执行实现任务',
+    'node-dev-d3': '写回 result.json',
+    'fl-main-role': '心跳主脑',
+    'fl-main-subtitle': 'Orchestrator',
+    'fl-bm-role': '文曲星',
+    'fl-bm-subtitle': 'Content Curator',
+    'fl-trader-role': '财神',
+    'fl-trader-subtitle': 'Treasury',
+    'fl-legend': '彩色小点 = 智能体间实时数据流',
+    'decision-social': '社交',
+    'decision-treasury': '金库',
+    'fl-edge-tas-social': 'TAS_社交',
+    'fl-edge-topic-brief': '话题摘要',
+    'fl-edge-treasury-policy': '金库策略',
+    'fl-edge-reward-status': '奖励状态',
+    'edge-topic-brief': '话题摘要',
+    'edge-content-candidates': '内容候选',
+    'edge-tas-social': 'TAS_社交',
+    'edge-wallet-snapshot': '钱包快照',
+    'edge-reward-status': '奖励状态',
+    'edge-tas-trade': 'TAS_交易',
+    'edge-guidance': '引导',
+    'edge-topic-priority': '话题优先级',
+    'edge-treasury-policy': '金库策略',
+    'edge-risk-mode': '风险模式',
+    'edge-task-json': 'task.json',
+    'edge-impl-request': '实现请求',
+    'edge-result-json': 'result.json',
+    'edge-completion-feedback': '完成反馈',
+    'section-dev': '🔨 鲁班 · 开发调度',
+    'label-dev-status': '状态',
+    'label-dev-task': '任务',
+    'label-dev-completed': '完成时间',
+    'section-dev-summary': '任务摘要',
+    'section-dev-files': '变更文件',
+  },
+  en: {
+    subtitle: 'Agent Dashboard',
+    refresh: '↻ Refresh',
+    'tas-social-label': 'social',
+    'tas-trade-label': 'trade',
+    'panel-main': 'Main Agent',
+    'label-op': 'OP',
+    'label-vp': 'VP',
+    'label-mode': 'Mode',
+    'section-tas': 'TAS Components',
+    'recent-cycles': 'Recent cycles',
+    'section-last-decision': 'Last Decision',
+    'section-social-intent': 'Social Intent',
+    'panel-bookmarker': 'Bookmarker Agent',
+    'label-x-sync': 'X Sync',
+    'label-last-sync': 'Last Sync',
+    'section-topic-brief': 'Topic Brief',
+    'section-content-candidates': 'Content Candidates',
+    'panel-trader': 'Trader Agent',
+    'label-risk': 'Risk',
+    'section-wallet': 'Wallet Balances',
+    'section-rewards': 'Claimable Rewards',
+    'section-risk-flags': 'Risk Flags',
+    'section-timeline': 'Timeline',
+    'section-graph': 'Agent Collaboration Graph',
+    'section-feedback': 'Agent Feedback Loop',
+    'panel-dev': 'Luban / Claude Dispatch',
+    'label-status': 'Status',
+    'label-completed-at': 'Completed',
+    'section-built-tools': 'Built Software / Tools',
+    'section-result-summary': 'Result Summary',
+    'section-files-changed': 'Files Changed',
+    'section-result-links': 'Result Links',
+    'built-dashboard': 'TagClaw Dashboard',
+    'built-website': 'TagClaw Website',
+    'built-follow': 'Follow System',
+    'latest-deliverable': 'Latest Deliverable',
+    'live-dashboard': 'Live Dashboard',
+    'github-repo': 'GitHub Repository',
+    'no-links': 'No links available',
+    'no-dev-result': 'No Luban deliverable yet',
+    'no-data': 'No data',
+    'no-tas-history': 'No TAS history available',
+    'no-actions': 'No actions',
+    'candidates-unit': 'candidate(s)',
+    'no-candidates': 'No candidates',
+    'total-value': 'Total Value',
+    'portfolio-share': 'Portfolio share',
+    'no-balance': 'No balance data',
+    'no-rewards': 'No claimable rewards',
+    'no-risk-flags': 'No risk flags',
+    'no-timeline': 'No timeline data',
+    'fetch-error': 'Fetch error: ',
+    'legend-data': 'data / runtime output',
+    'legend-command': 'command / task dispatch',
+    'legend-pulse': 'recent active node',
+    'tooltip-status': 'Status',
+    'tooltip-last-update': 'Last update',
+    'tooltip-flows': 'Flows',
+    'node-bm-role': 'Content Sync',
+    'node-bm-d1': 'Sync X bookmarks / tweets',
+    'node-bm-d2': 'Output topic-brief / content-candidates',
+    'node-bm-d3': 'Provide TAS_social',
+    'node-trader-role': 'Treasury',
+    'node-trader-d1': 'Monitor wallet / rewards',
+    'node-trader-d2': 'Evaluate TAS_trade',
+    'node-trader-d3': 'Output risk status',
+    'node-main-role': 'Orchestrator',
+    'node-main-d1': 'Aggregate 3 pipelines',
+    'node-main-d2': 'Compute TAS',
+    'node-main-d3': 'Make post / curate / conservative decisions',
+    'node-dev-role': 'Claude Dispatch',
+    'node-dev-d1': 'Read dev task.json',
+    'node-dev-d2': 'Execute implementation tasks',
+    'node-dev-d3': 'Write back result.json',
+    'fl-main-role': 'Orchestrator',
+    'fl-main-subtitle': '心跳主脑',
+    'fl-bm-role': 'Content Curator',
+    'fl-bm-subtitle': '文曲星',
+    'fl-trader-role': 'Treasury',
+    'fl-trader-subtitle': '财神',
+    'fl-legend': 'Animated dots = live data flow between agents',
+    'decision-social': 'Social',
+    'decision-treasury': 'Treasury',
+    'fl-edge-tas-social': 'TAS_social',
+    'fl-edge-topic-brief': 'topic-brief',
+    'fl-edge-treasury-policy': 'treasury-policy',
+    'fl-edge-reward-status': 'reward-status',
+    'edge-topic-brief': 'topic-brief',
+    'edge-content-candidates': 'content-candidates',
+    'edge-tas-social': 'TAS_social',
+    'edge-wallet-snapshot': 'wallet-snapshot',
+    'edge-reward-status': 'reward-status',
+    'edge-tas-trade': 'TAS_trade',
+    'edge-guidance': 'guidance',
+    'edge-topic-priority': 'topic priority',
+    'edge-treasury-policy': 'treasury policy',
+    'edge-risk-mode': 'risk mode',
+    'edge-task-json': 'task.json',
+    'edge-impl-request': 'implementation request',
+    'edge-result-json': 'result.json',
+    'edge-completion-feedback': 'completion feedback',
+    'section-dev': '🔨 鲁班 · Dev Dispatch',
+    'label-dev-status': 'Status',
+    'label-dev-task': 'Task',
+    'label-dev-completed': 'Completed',
+    'section-dev-summary': 'Task Summary',
+    'section-dev-files': 'Files Changed',
+  },
+};
+
+let _lang = localStorage.getItem('tcx_lang') || 'zh';
+let _lastStatus = null;
+let _lastTimeline = null;
+
+function t(key) {
+  return (I18N[_lang] || I18N.zh)[key] ?? (I18N.zh)[key] ?? key;
+}
+
+function applyLang() {
+  document.documentElement.lang = _lang === 'zh' ? 'zh' : 'en';
+  document.title = _lang === 'zh' ? 'TagClawX · 智能体看板' : 'TagClawX · Agent Dashboard';
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('.lang-seg').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.lang === _lang);
+  });
+  if (_lastStatus) renderStatus(_lastStatus);
+  if (_lastTimeline) renderTimeline(_lastTimeline);
+}
+
+function setLang(l) {
+  _lang = l;
+  localStorage.setItem('tcx_lang', l);
+  applyLang();
+}
+
 // ── Clock ──────────────────────────────────────────────────────────────────
 function updateClock() {
   const el = document.getElementById('clock');
-  if (el) el.textContent = new Date().toLocaleString('zh-CN', { hour12: false });
+  if (el) el.textContent = new Date().toLocaleString(_lang === 'zh' ? 'zh-CN' : 'en-US', { hour12: false });
 }
 setInterval(updateClock, 1000);
 updateClock();
@@ -74,7 +323,7 @@ function setPill(id, status) {
 }
 
 function listHtml(items) {
-  if (!items || !items.length) return '<div class="muted small">No data</div>';
+  if (!items || !items.length) return `<div class="muted small">${t('no-data')}</div>`;
   return items.map(it => `
     <div class="list-item">
       <div class="item-left">
@@ -107,14 +356,12 @@ async function fetchJSON(url) {
 // ── Render ─────────────────────────────────────────────────────────────────
 
 function renderStatus(data) {
-  // ── Agent pills ──
   const rs = data.runtime_status || {};
   ['main','bookmarker','trader'].forEach(a => {
     const info = rs[a] || {};
     setPill('pill-' + a, info.status || '');
   });
 
-  // ── TAS header ──
   const tas = (data.main || {}).tas_latest || {};
   const tasTotal  = tas.tas_total  ?? null;
   const tasSocial = tas.tas_social ?? null;
@@ -130,6 +377,7 @@ function renderStatus(data) {
   renderMain(data.main || {});
   renderBookmarker(data.bookmarker || {});
   renderTrader(data.trader || {});
+  renderDev(data.dev_dispatch || {});
   renderAgentGraph(data);
 }
 
@@ -146,7 +394,7 @@ function sparklineSvg(values, color) {
   const padY = 10;
   const valid = values.map((v, i) => ({ v: numericOrNull(v), i })).filter(p => p.v !== null);
   if (!valid.length) {
-    return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="10">No history</text></svg>`;
+    return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="10">${t('no-tas-history')}</text></svg>`;
   }
   const min = Math.min(...valid.map(p => p.v));
   const max = Math.max(...valid.map(p => p.v));
@@ -164,7 +412,7 @@ function renderTasHistory(history, tas) {
   if (!el) return;
   const points = Array.isArray(history) ? history : [];
   if (!points.length) {
-    el.innerHTML = '<div class="muted small">No TAS history available</div>';
+    el.innerHTML = `<div class="muted small">${t('no-tas-history')}</div>`;
     return;
   }
   const metrics = [
@@ -197,7 +445,6 @@ function renderMain(main) {
   const si  = main.social_intent || {};
   const sum = ip.summary || {};
 
-  // OP / VP
   const op = sum.op ?? null;
   const vp = sum.vp ?? null;
   setText('main-op', op !== null ? fmtNum(op) : '—');
@@ -205,30 +452,26 @@ function renderMain(main) {
   setBar('bar-op', op !== null ? (op / 2000) * 100 : 0, op > 1500 ? 'ok' : op > 800 ? 'warn' : 'error');
   setBar('bar-vp', vp !== null ? (vp / 200)  * 100 : 0, 'ok');
 
-  // Mode badge
   const mode = sum.mode || dec.mode || '—';
   setBadge('main-mode-badge', mode, mode.toLowerCase().replace(/[^a-z-]/g, ''));
 
-  // TAS components
   setText('main-tas-social', fmt(tas.tas_social));
   setText('main-tas-trade',  fmt(tas.tas_trade));
   setText('main-tas-total',  fmt(tas.tas_total));
   renderTasHistory(main.tas_history || [], tas);
 
-  // Last decision
   const decText = [
-    dec.social_decision ? `Social: ${dec.social_decision}` : null,
-    dec.treasury_decision ? `Treasury: ${dec.treasury_decision}` : null,
+    dec.social_decision ? `${t('decision-social')}: ${dec.social_decision}` : null,
+    dec.treasury_decision ? `${t('decision-treasury')}: ${dec.treasury_decision}` : null,
     dec.reason || null,
   ].filter(Boolean).join('\n') || '—';
   setText('main-decision', decText);
 
-  // Social intent actions
   const actions = si.payload?.actions || [];
   const intentEl = $('main-social-intent');
   if (intentEl) {
     if (!actions.length) {
-      intentEl.innerHTML = `<div class="muted small">${escHtml(si.reason || si.status || 'No actions')}</div>`;
+      intentEl.innerHTML = `<div class="muted small">${escHtml(si.reason || si.status || t('no-actions'))}</div>`;
     } else {
       intentEl.innerHTML = listHtml(actions.map(a => ({
         title: a.type || a.action || JSON.stringify(a),
@@ -241,21 +484,18 @@ function renderMain(main) {
 
 // ── Bookmarker Panel ──
 function renderBookmarker(bm) {
-  const src  = bm.source_health        || {};
+  const src   = bm.source_health       || {};
   const brief = bm.topic_brief         || {};
   const cands = bm.content_candidates  || {};
   const auto  = bm.autonomy_intent     || {};
 
-  // X sync
   const xSync = src.x_sync || {};
   setBadge('bm-sync-status', xSync.status || src.status || '—');
   setText('bm-sync-at', shortTs(xSync.fetched_at || src.fetched_at || src.updated_at));
 
-  // Mode
   const autoMode = auto.mode || auto.autonomy_mode || '—';
   setBadge('bm-mode-badge', autoMode, autoMode.toLowerCase().replace(/[^a-z-]/g,''));
 
-  // Topic brief
   setText('bm-headline', brief.headline || brief.summary || '—');
   const kwEl = $('bm-keywords');
   if (kwEl) {
@@ -263,10 +503,9 @@ function renderBookmarker(bm) {
     kwEl.innerHTML = kws.slice(0, 8).map(k => `<span class="tag">${escHtml(k)}</span>`).join('');
   }
 
-  // Content candidates
   const candidateList = cands.candidates || brief.candidates || [];
   const count = candidateList.length;
-  setText('bm-cands-count', count ? `${count} candidate(s)` : 'No candidates');
+  setText('bm-cands-count', count ? `${count} ${t('candidates-unit')}` : t('no-candidates'));
   const candsEl = $('bm-cands-list');
   if (candsEl) {
     candsEl.innerHTML = listHtml(
@@ -281,22 +520,19 @@ function renderBookmarker(bm) {
 
 // ── Trader Panel ──
 function renderTrader(trader) {
-  const wallet  = trader.wallet_snapshot || {};
-  const rewards = trader.reward_status   || {};
-  const tasT    = trader.tas_trade       || {};
-  const risk    = trader.risk_status     || {};
+  const wallet  = trader.wallet_snapshot   || {};
+  const rewards = trader.reward_status     || {};
+  const tasT    = trader.tas_trade         || {};
+  const risk    = trader.risk_status       || {};
   const onchain = trader.onchain_positions || {};
 
-  // TAS / mode
   setText('trader-tas', fmt(tasT.score ?? tasT.tas_trade));
   const trMode = tasT.autonomy_mode || '—';
   setBadge('trader-mode-badge', trMode, trMode.toLowerCase().replace(/[^a-z-]/g,''));
 
-  // Risk badge
   const riskLvl = risk.level || risk.status || (risk.risk_flags?.length ? 'partial' : 'ok') || '—';
   setBadge('trader-risk-badge', riskLvl);
 
-  // Wallet balances
   const balEl = $('trader-balances');
   if (balEl) {
     const totalUsd = onchain.total_portfolio_usd;
@@ -304,7 +540,7 @@ function renderTrader(trader) {
     if (positions.length) {
       const total = parseFloat(totalUsd || 0);
       const totalRow = totalUsd != null
-        ? `<div class="list-item wallet-total"><div class="item-left"><div class="item-title">Total Value</div></div><div class="item-right">$${fmt(totalUsd)}</div></div>`
+        ? `<div class="list-item wallet-total"><div class="item-left"><div class="item-title">${t('total-value')}</div></div><div class="item-right">$${fmt(totalUsd)}</div></div>`
         : '';
       const rows = positions.map(p => {
         const value = parseFloat(p.value_usd || 0);
@@ -315,7 +551,7 @@ function renderTrader(trader) {
         <div class="list-item ${level}">
           <div class="item-left">
             <div class="item-title">${escHtml(p.tick || '')}</div>
-            <div class="item-sub">Portfolio share ${escHtml(pct)}</div>
+            <div class="item-sub">${t('portfolio-share')} ${escHtml(pct)}</div>
           </div>
           <div class="item-right">${escHtml(fmtNum(parseFloat(p.balance)))} ($${escHtml(fmt(p.value_usd))})</div>
         </div>`;
@@ -327,16 +563,15 @@ function renderTrader(trader) {
         title: tick,
         right: fmtNum(parseFloat(amt)),
       }));
-      balEl.innerHTML = items.length ? listHtml(items) : '<div class="muted small">No balance data</div>';
+      balEl.innerHTML = items.length ? listHtml(items) : `<div class="muted small">${t('no-balance')}</div>`;
     }
   }
 
-  // Rewards
   const rewEl = $('trader-rewards');
   if (rewEl) {
     const claimable = rewards.claimable || [];
     if (!claimable.length) {
-      rewEl.innerHTML = '<div class="muted small">No claimable rewards</div>';
+      rewEl.innerHTML = `<div class="muted small">${t('no-rewards')}</div>`;
     } else {
       rewEl.innerHTML = listHtml(claimable.map(r => ({
         title: r.tick,
@@ -346,17 +581,80 @@ function renderTrader(trader) {
     }
   }
 
-  // Risk flags
   const flagEl = $('trader-risk-flags');
   if (flagEl) {
     const flags = risk.risk_flags || risk.reasons || [];
     if (!flags.length) {
-      flagEl.innerHTML = '<div class="muted small">No risk flags</div>';
+      flagEl.innerHTML = `<div class="muted small">${t('no-risk-flags')}</div>`;
     } else {
       flagEl.innerHTML = flags.map(f =>
         `<div class="list-item"><div class="item-title clr-warn">${escHtml(f)}</div></div>`
       ).join('');
     }
+  }
+}
+
+function inferBuiltTools(result) {
+  const files = result.files_changed || [];
+  const summary = result.task_summary || '';
+  const tools = [];
+  const add = (key) => { if (!tools.includes(key)) tools.push(key); };
+  if (files.some(f => String(f).includes('tools/viz')) || /dashboard/i.test(summary)) add('built-dashboard');
+  if (files.some(f => String(f).includes('TagClaw-Website'))) add('built-website');
+  if (/follow/i.test(summary) || files.some(f => String(f).includes('follow'))) add('built-follow');
+  if (!tools.length) add('latest-deliverable');
+  return tools;
+}
+
+function inferResultLinks(result) {
+  const files = result.files_changed || [];
+  const summary = result.task_summary || '';
+  const links = [];
+  if (files.some(f => String(f).includes('tools/viz')) || /dashboard/i.test(summary)) {
+    links.push({ label: t('live-dashboard'), href: 'https://dashboard.tagclaw.com' });
+    links.push({ label: t('github-repo'), href: 'https://github.com/tagai-dao/Tagclaw-dashboard' });
+  }
+  if (files.some(f => String(f).includes('TagClaw-Website'))) {
+    links.push({ label: t('github-repo'), href: 'https://github.com/tagai-dao/TagClaw-Website' });
+  }
+  return links;
+}
+
+function renderDev(dev) {
+  const status = dev.status || {};
+  const result = dev.result || {};
+  setBadge('dev-status-badge', result.status || status.status || '—');
+  setText('dev-completed-at', shortTs(result.completed_at || status.updated_at || status.started_at));
+
+  const builtEl = $('dev-built-list');
+  if (builtEl) {
+    if (!result.status) {
+      builtEl.innerHTML = `<div class="muted small">${escHtml(t('no-dev-result'))}</div>`;
+    } else {
+      const tools = inferBuiltTools(result);
+      builtEl.innerHTML = listHtml(tools.map(k => ({ title: t(k), sub: result.task_id || '' })));
+    }
+  }
+
+  const summaryEl = $('dev-result-summary');
+  if (summaryEl) {
+    summaryEl.textContent = result.task_summary || t('no-dev-result');
+  }
+
+  const filesEl = $('dev-files-changed');
+  if (filesEl) {
+    const files = result.files_changed || [];
+    filesEl.innerHTML = files.length
+      ? listHtml(files.slice(0, 6).map(f => ({ title: f })))
+      : `<div class="muted small">${escHtml(t('no-data'))}</div>`;
+  }
+
+  const linksEl = $('dev-result-links');
+  if (linksEl) {
+    const links = inferResultLinks(result);
+    linksEl.innerHTML = links.length
+      ? links.map(l => `<div class="list-item"><div class="item-left"><a class="dev-link" href="${escHtml(l.href)}" target="_blank" rel="noopener noreferrer">${escHtml(l.label)}</a></div></div>`).join('')
+      : `<div class="muted small">${escHtml(t('no-links'))}</div>`;
   }
 }
 
@@ -384,12 +682,7 @@ function agentState(statusText, updatedAt) {
 }
 
 function graphNodeFill(key, state) {
-  const palette = {
-    main: '#00d26a',
-    bookmarker: '#58a6ff',
-    trader: '#f0a500',
-    dev: '#a855f7',
-  };
+  const palette = { main: '#00d26a', bookmarker: '#58a6ff', trader: '#f0a500', dev: '#a855f7' };
   if (state === 'idle') return 'rgba(139,148,158,0.35)';
   return palette[key] || '#58a6ff';
 }
@@ -423,28 +716,28 @@ function renderAgentGraph(data) {
 
   const nodes = {
     bookmarker: {
-      x: 115, y: 90, r: 40, emoji: '📡', name: '文曲星', role: 'Content Sync',
+      x: 115, y: 90, r: 40, emoji: '📡', name: '文曲星', role: t('node-bm-role'),
       status: bmStatus.status || (data.bookmarker?.source_health?.status) || '',
       updatedAt: bmStatus.updated_at || data.bookmarker?.source_health?.updated_at || data.bookmarker?.source_health?.fetched_at || '',
-      detail: ['同步 X bookmarks / tweets', '输出 topic-brief / content-candidates', '提供 TAS_social'],
+      detail: [t('node-bm-d1'), t('node-bm-d2'), t('node-bm-d3')],
     },
     trader: {
-      x: 115, y: 270, r: 40, emoji: '💰', name: '财神', role: 'Treasury',
+      x: 115, y: 270, r: 40, emoji: '💰', name: '财神', role: t('node-trader-role'),
       status: traderStatus.status || (data.trader?.risk_status?.status) || '',
       updatedAt: traderStatus.updated_at || data.trader?.risk_status?.updated_at || '',
-      detail: ['监控 wallet / rewards', '评估 TAS_trade', '输出 risk status'],
+      detail: [t('node-trader-d1'), t('node-trader-d2'), t('node-trader-d3')],
     },
     main: {
-      x: 290, y: 180, r: 46, emoji: '🐾', name: 'main', role: 'Orchestrator',
+      x: 290, y: 180, r: 46, emoji: '🐾', name: 'main', role: t('node-main-role'),
       status: mainStatus.status || (data.health?.status) || '',
       updatedAt: mainStatus.updated_at || data.health?.updated_at || data.fetched_at || '',
-      detail: ['汇总 3 条链路', '计算 TAS', '做发帖 / 策展 / 保守决策'],
+      detail: [t('node-main-d1'), t('node-main-d2'), t('node-main-d3')],
     },
     dev: {
-      x: 465, y: 180, r: 42, emoji: '🔨', name: '鲁班', role: 'Claude Dispatch',
+      x: 465, y: 180, r: 42, emoji: '🔨', name: '鲁班', role: t('node-dev-role'),
       status: devStatus.status || '',
       updatedAt: devStatus.updated_at || devStatus.started_at || '',
-      detail: ['读取 dev task.json', '执行实现任务', '写回 result.json'],
+      detail: [t('node-dev-d1'), t('node-dev-d2'), t('node-dev-d3')],
     },
   };
 
@@ -455,12 +748,12 @@ function renderAgentGraph(data) {
   });
 
   const edges = [
-    { from: 'bookmarker', to: 'main', type: 'data', lines: ['topic-brief', 'content-candidates', 'TAS_social'] },
-    { from: 'trader', to: 'main', type: 'data', lines: ['wallet-snapshot', 'reward-status', 'TAS_trade'] },
-    { from: 'main', to: 'bookmarker', type: 'command', lines: ['guidance', 'topic priority'] },
-    { from: 'main', to: 'trader', type: 'command', lines: ['treasury policy', 'risk mode'] },
-    { from: 'main', to: 'dev', type: 'command', lines: ['task.json', 'implementation request'] },
-    { from: 'dev', to: 'main', type: 'data', lines: ['result.json', 'completion feedback'] },
+    { from: 'bookmarker', to: 'main', type: 'data', lines: [t('edge-topic-brief'), t('edge-content-candidates'), t('edge-tas-social')] },
+    { from: 'trader', to: 'main', type: 'data', lines: [t('edge-wallet-snapshot'), t('edge-reward-status'), t('edge-tas-trade')] },
+    { from: 'main', to: 'bookmarker', type: 'command', lines: [t('edge-guidance'), t('edge-topic-priority')] },
+    { from: 'main', to: 'trader', type: 'command', lines: [t('edge-treasury-policy'), t('edge-risk-mode')] },
+    { from: 'main', to: 'dev', type: 'command', lines: [t('edge-task-json'), t('edge-impl-request')] },
+    { from: 'dev', to: 'main', type: 'data', lines: [t('edge-result-json'), t('edge-completion-feedback')] },
   ].map((edge, idx) => ({ ...edge, id: `edge-${idx}` }));
 
   const ns = 'http://www.w3.org/2000/svg';
@@ -483,13 +776,13 @@ function renderAgentGraph(data) {
 
   edges.forEach(edge => {
     const s = nodes[edge.from];
-    const t = nodes[edge.to];
-    const dx = t.x - s.x;
+    const tgt = nodes[edge.to];
+    const dx = tgt.x - s.x;
     const dir = dx >= 0 ? 1 : -1;
     const startX = s.x + dir * (s.r + 4);
-    const endX = t.x - dir * (t.r + 4);
+    const endX = tgt.x - dir * (tgt.r + 4);
     const startY = s.y;
-    const endY = t.y;
+    const endY = tgt.y;
     const curve = Math.max(26, Math.abs(dx) * 0.18);
     const ctrl1X = startX + dir * curve;
     const ctrl2X = endX - dir * curve;
@@ -574,9 +867,9 @@ function renderAgentGraph(data) {
 
   if (legend) {
     legend.innerHTML = `
-      <span class="graph-legend-item"><span class="graph-legend-line"></span> data / runtime output</span>
-      <span class="graph-legend-item"><span class="graph-legend-line command"></span> command / task dispatch</span>
-      <span class="graph-legend-item"><span class="mono">pulse</span> recent active node</span>`;
+      <span class="graph-legend-item"><span class="graph-legend-line"></span> ${t('legend-data')}</span>
+      <span class="graph-legend-item"><span class="graph-legend-line command"></span> ${t('legend-command')}</span>
+      <span class="graph-legend-item"><span class="mono">pulse</span> ${t('legend-pulse')}</span>`;
   }
 }
 
@@ -599,10 +892,10 @@ function showGraphTooltip(ev, node, edges, tooltip) {
   const updated = node.updatedAt ? shortTs(node.updatedAt) : '—';
   tooltip.innerHTML = `
     <div class="title">${escHtml(node.name)} · ${escHtml(node.role)}</div>
-    <div>Status: <span class="mono">${escHtml(graphStatusText(node.state, node.status))}</span></div>
-    <div>Last update: <span class="mono">${escHtml(updated)}</span></div>
+    <div>${t('tooltip-status')}: <span class="mono">${escHtml(graphStatusText(node.state, node.status))}</span></div>
+    <div>${t('tooltip-last-update')}: <span class="mono">${escHtml(updated)}</span></div>
     <div class="sub">${node.detail.map(escHtml).join(' · ')}</div>
-    <div class="sub">Flows: ${related.map(e => escHtml(`${e.from} → ${e.to}`)).join(' / ')}</div>`;
+    <div class="sub">${t('tooltip-flows')}: ${related.map(e => escHtml(`${e.from} → ${e.to}`)).join(' / ')}</div>`;
   tooltip.classList.remove('hidden');
   moveGraphTooltip(ev, tooltip);
 }
@@ -634,7 +927,7 @@ function renderTimeline(data) {
   if (!listEl) return;
 
   if (!items.length) {
-    listEl.innerHTML = '<div class="muted small">No timeline data</div>';
+    listEl.innerHTML = `<div class="muted small">${t('no-timeline')}</div>`;
     return;
   }
 
@@ -659,10 +952,12 @@ async function fetchAll() {
       fetchJSON('/api/status'),
       fetchJSON('/api/timeline'),
     ]);
+    _lastStatus = status;
+    _lastTimeline = timeline;
     renderStatus(status);
     renderTimeline(timeline);
   } catch (e) {
-    showError('Fetch error: ' + e.message);
+    showError(t('fetch-error') + e.message);
     console.error(e);
   }
 }
@@ -670,3 +965,6 @@ async function fetchAll() {
 // Auto-refresh every 30 seconds
 fetchAll();
 setInterval(fetchAll, 30_000);
+
+// ── Init language ──────────────────────────────────────────────────────────
+applyLang();
