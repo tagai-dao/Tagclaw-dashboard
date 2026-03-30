@@ -22,7 +22,7 @@ Default port: **7890** (override with `VIZ_PORT=8080 python3 tools/viz/server.py
 | Section | Data |
 |---|---|
 | Header | TAS total · agent status pills · live clock |
-| Main Agent | OP/VP bars · TAS components · recent-cycle TAS trend charts · mode badge · last decision · social intent |
+| Main Agent | OP/VP bars · TAS components · recent-cycle TAS trend charts · mode badge · last decision · social intent · social actions |
 | Bookmarker | X sync status · topic headline · keywords · content candidates · autonomy mode |
 | Trader | Wallet balances · total USD value · per-token USD values · portfolio share highlighting · claimable rewards · TAS_trade · risk flags |
 | Timeline | Last 50 trader + bookmarker + main events, mixed and sorted by time |
