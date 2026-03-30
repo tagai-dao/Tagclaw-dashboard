@@ -26,7 +26,8 @@ Default port: **7890** (override with `VIZ_PORT=8080 python3 tools/viz/server.py
 | Bookmarker | X sync status · topic headline · keywords · content candidates · autonomy mode |
 | Trader | Wallet balances · total USD value · per-token USD values · portfolio share highlighting · claimable rewards · TAS_trade · risk flags |
 | Timeline | Last 50 trader + bookmarker + main events, mixed and sorted by time |
-| Lower Panels | Timeline · Agent Collaboration Graph · Agent Feedback Loop |
+| Lower Panels | Timeline · Data Collection · Agent Feedback Loop |
+| Data Collection | X Sync status · Data Alignment by 0xNought · Community Engagement · Monitor Daily Community Overviews · Trending News |
 
 ## API Endpoints
 
@@ -36,6 +37,7 @@ Default port: **7890** (override with `VIZ_PORT=8080 python3 tools/viz/server.py
 | `GET /api/status` | Aggregated snapshot of all three agents, including trader on-chain positions and main TAS history |
 | `GET /api/timeline` | Last 50 trader + bookmarker + main events |
 | `GET /api/runtime/{agent}/{file}` | Single runtime file (e.g. `/api/runtime/main/tas-latest.json`) |
+| `GET /api/monitor/steemit` | Latest Steemit community monitor data (`memory/steemit-community-monitor-latest.json`) |
 
 ## Data Sources
 
