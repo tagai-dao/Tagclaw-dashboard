@@ -493,6 +493,7 @@ def api_status():
     bm_cands     = _safe("bookmarker/content-candidates.json")  or {}
     auto_intent  = _safe("bookmarker/autonomy-intent.json")     or {}
     social_hist  = _safe("shared/social-history.json")          or {}
+    social_drafts = _safe("bookmarker/social-drafts.json")      or {}
 
     # ── Trader ──
     wallet   = _safe("trader/wallet-snapshot.json") or {}
@@ -540,6 +541,7 @@ def api_status():
             "source_health":        src_health,
             "content_candidates":   bm_cands,
             "autonomy_intent":      auto_intent,
+            "social_drafts":        social_drafts,
             "social_actions":       list(reversed((social_hist.get("items") or [])[-20:])),
             "x_posts":              (_xp := _parse_x_tweets(hours=24, limit=20)),
             "x_posts_window":       "24h" if _xp and _xp[0].get("date") and
