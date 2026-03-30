@@ -921,8 +921,9 @@ async function renderDataCollection(data) {
     ? (bm.source_health.find(s => s.status === 'ok')?.name || '—')
     : (bm.source_health?.name || bm.source_health?.source || '—');
   setText('dc-x-sync-source', okSource);
-  setText('dc-x-sync-tweets',    Array.isArray(bm.x_posts)     ? bm.x_posts.length     : (bm.x_posts_count     ?? '—'));
-  setText('dc-x-sync-bookmarks', Array.isArray(bm.x_bookmarks) ? bm.x_bookmarks.length : (bm.x_bookmarks_count ?? '—'));
+  const totalItems = (Array.isArray(bm.x_posts) ? bm.x_posts.length : 0)
+                   + (Array.isArray(bm.x_bookmarks) ? bm.x_bookmarks.length : 0);
+  setText('dc-x-sync-bookmarks', totalItems > 0 ? totalItems : '—');
 
   // ── Card 2: Data Alignment by 0xNought ──
   renderDataAlignment(data);

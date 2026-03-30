@@ -347,14 +347,36 @@ def _load_twin_recognition() -> dict:
 
 
 def _load_x_sync() -> dict:
-    """Read memory/x-sync-latest.json → {status, fetched_at}."""
-    path = WORKSPACE / "memory" / "x-sync-latest.json"
-    data = _load(path)
-    if not isinstance(data, dict):
-        return {"x_sync_status": "unknown", "x_sync_at": ""}
+    """Read x-sync status and timestamp, preferring bookmarker runtime over memory."""
+    runtime_path = Path(__file__).parent.parent.parent / 'runtime' / 'bookmarker' / 'latest.json'
+    memory_path = WORKSPACE / "memory" / "x-sync-latest.json"
+
+    runtime_at = ''
+    runtime_status = 'unknown'
+    if runtime_path.exists():
+        try:
+            r = json.loads(runtime_path.read_text())
+            runtime_at = r.get('updated_at') or r.get('generated_at') or ''
+            runtime_status = r.get('status') or 'unknown'
+        except Exception:
+            pass
+
+    memory_at = ''
+    memory_status = 'unknown'
+    if memory_path.exists():
+        try:
+            m = json.loads(memory_path.read_text())
+            memory_at = m.get('fetched_at') or ''
+            memory_status = m.get('status') or 'unknown'
+        except Exception:
+            pass
+
+    best_at = runtime_at if runtime_at >= memory_at else memory_at
+    best_status = runtime_status if runtime_at >= memory_at else memory_status
+
     return {
-        "x_sync_status": data.get("status", "unknown"),
-        "x_sync_at":     data.get("fetched_at", ""),
+        'x_sync_status': best_status,
+        'x_sync_at': best_at,
     }
 
 
