@@ -27,7 +27,28 @@ const I18N = {
     'section-rewards': '可领奖励',
     'section-risk-flags': '风险标志',
     'section-timeline': '时间轴',
-    'section-graph': '智能体协作图',
+    'section-data-collection': '数据采集',
+    'dc-x-sync': 'X 同步',
+    'dc-alignment': '0xNought 数据对齐',
+    'dc-community': '社区参与数据',
+    'dc-monitor': '监控每日社区概览',
+    'dc-trending': '热门资讯',
+    'dc-last-sync': '上次同步',
+    'dc-source': '来源',
+    'dc-tweets': '推文数',
+    'dc-bookmarks': '收藏数',
+    'dc-tas-social': 'TAS_social',
+    'dc-align-score': '对齐分',
+    'dc-community-score': '社区分',
+    'dc-window': '窗口',
+    'dc-community-score-val': '社区分',
+    'dc-scanned-at': '扫描时间',
+    'dc-posts-scanned': '已扫描帖子',
+    'dc-source-label': '来源',
+    'dc-monitor-community': '社区',
+    'dc-monitor-latest-post': '最新帖子',
+    'dc-monitor-age': '时效',
+    'dc-monitor-stale': '是否过期',
     'section-feedback': '智能体反馈循环',
     'panel-dev': '鲁班 / Claude 调度',
     'label-status': '状态',
@@ -111,6 +132,15 @@ const I18N = {
     'label-dev-completed': '完成时间',
     'section-dev-summary': '任务摘要',
     'section-dev-files': '变更文件',
+    'section-social-actions': '策展动作历史',
+    'no-social-actions': '暂无动作记录',
+    'timeline-filter-note': '仅显示已完成动作',
+    'section-x-sync': 'X 数据同步',
+    'section-x-posts': 'X 帖子',
+    'section-x-bookmarks': 'X 收藏',
+    'no-x-data': '暂无数据',
+    'section-trade-actions': '交易动作',
+    'no-trade-actions': '暂无交易记录',
   },
   en: {
     subtitle: 'Agent Dashboard',
@@ -136,7 +166,28 @@ const I18N = {
     'section-rewards': 'Claimable Rewards',
     'section-risk-flags': 'Risk Flags',
     'section-timeline': 'Timeline',
-    'section-graph': 'Agent Collaboration Graph',
+    'section-data-collection': 'Data Collection',
+    'dc-x-sync': 'X Sync',
+    'dc-alignment': 'Data Alignment by 0xNought',
+    'dc-community': 'Community Engagement Data',
+    'dc-monitor': 'Monitor Daily Community Overviews',
+    'dc-trending': 'Trending News',
+    'dc-last-sync': 'Last Sync',
+    'dc-source': 'Source',
+    'dc-tweets': 'Tweets',
+    'dc-bookmarks': 'Bookmarks',
+    'dc-tas-social': 'TAS_social',
+    'dc-align-score': 'Align Score',
+    'dc-community-score': 'Community Score',
+    'dc-window': 'Window',
+    'dc-community-score-val': 'Community Score',
+    'dc-scanned-at': 'Scanned At',
+    'dc-posts-scanned': 'Posts Scanned',
+    'dc-source-label': 'Source',
+    'dc-monitor-community': 'Community',
+    'dc-monitor-latest-post': 'Latest Post',
+    'dc-monitor-age': 'Age',
+    'dc-monitor-stale': 'Stale',
     'section-feedback': 'Agent Feedback Loop',
     'panel-dev': 'Luban / Claude Dispatch',
     'label-status': 'Status',
@@ -220,6 +271,15 @@ const I18N = {
     'label-dev-completed': 'Completed',
     'section-dev-summary': 'Task Summary',
     'section-dev-files': 'Files Changed',
+    'section-social-actions': 'Social Actions',
+    'no-social-actions': 'No actions yet',
+    'timeline-filter-note': 'Completed actions only',
+    'section-x-sync': 'X Sync',
+    'section-x-posts': 'X Posts',
+    'section-x-bookmarks': 'X Bookmarks',
+    'no-x-data': 'No data',
+    'section-trade-actions': 'Trade Actions',
+    'no-trade-actions': 'No trade actions',
   },
 };
 
@@ -378,7 +438,7 @@ function renderStatus(data) {
   renderBookmarker(data.bookmarker || {});
   renderTrader(data.trader || {});
   renderDev(data.dev_dispatch || {});
-  renderAgentGraph(data);
+  renderDataCollection(data).catch(e => console.warn('renderDataCollection error:', e));
 }
 
 function numericOrNull(v) {
@@ -482,6 +542,24 @@ function renderMain(main) {
   }
 }
 
+// ── X Section Toggle ──
+function toggleXSection(id) {
+  const list = $(id + '-list');
+  const btn  = $(id + '-toggle');
+  if (!list) return;
+  const isOpen = list.classList.toggle('open');
+  if (btn) btn.textContent = isOpen ? '▲' : '▼';
+}
+
+// ── Generic Section Toggle (collapsible by id pattern) ──
+function toggleSection(id) {
+  const coll = $(id + '-collapsible');
+  const btn  = $(id + '-toggle');
+  if (!coll) return;
+  const isOpen = coll.classList.toggle('open');
+  if (btn) btn.textContent = isOpen ? '▲' : '▼';
+}
+
 // ── Bookmarker Panel ──
 function renderBookmarker(bm) {
   const src   = bm.source_health       || {};
@@ -515,6 +593,104 @@ function renderBookmarker(bm) {
         right: c.score != null ? fmt(c.score) : '',
       }))
     );
+  }
+
+  const actionsEl = $('bm-actions-list');
+  if (actionsEl) {
+    const actions = bm.social_actions || [];
+    if (!actions.length) {
+      actionsEl.innerHTML = `<div class="muted small">${t('no-social-actions')}</div>`;
+    } else {
+      actionsEl.innerHTML = actions.map(a => {
+        const typeBadgeCls = statusClass(a.result_status || '');
+        const target = String(a.target_key || a.tweet_id || a.url || '').slice(0, 40);
+        return `
+        <div class="list-item">
+          <div class="item-left">
+            <span class="badge sm${typeBadgeCls ? ' ' + typeBadgeCls : ''}">${escHtml(a.type || '?')}</span>
+            ${target ? `<span class="item-sub mono">${escHtml(target)}</span>` : ''}
+          </div>
+          <div class="item-right">
+            ${a.result_status ? `<span class="badge sm ${statusClass(a.result_status)}">${escHtml(a.result_status)}</span>` : ''}
+            <span class="muted small">${shortTs(a.executed_at || a.ts || '')}</span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // ── X Sync status ──
+  const xSyncStatus = bm.x_sync_status || '—';
+  const xSyncAt = bm.x_sync_at || '';
+  const syncBadge = $('x-sync-badge');
+  if (syncBadge) {
+    syncBadge.textContent = xSyncStatus;
+    syncBadge.className = 'badge sm ' + (statusClass(xSyncStatus) || '');
+  }
+  setText('x-sync-at-text', xSyncAt ? shortTs(xSyncAt) : '—');
+
+  // ── X Posts ──
+  const xPosts = bm.x_posts || [];
+  const xPostsCountEl = $('x-posts-count');
+  // Show "N · 过去24h" or "N · 最近"
+  if (xPostsCountEl) {
+    const isLang = _lang === 'zh';
+    const windowLabel = bm.x_posts_window === '24h'
+      ? (isLang ? '过去24h' : 'last 24h')
+      : (isLang ? '最近记录' : 'recent');
+    xPostsCountEl.textContent = xPosts.length ? `${xPosts.length} · ${windowLabel}` : '0';
+  }
+  const xPostsEl = $('x-posts-list');
+  if (xPostsEl) {
+    if (!xPosts.length) {
+      xPostsEl.innerHTML = `<div class="muted small">${t('no-x-data')}</div>`;
+    } else {
+      xPostsEl.innerHTML = xPosts.map(p => {
+        const topics = (p.topics || []).map(tag =>
+          `<span class="x-tag">${escHtml(tag)}</span>`).join('');
+        // Format date: try to shorten it
+        const dateStr = p.date ? p.date.replace(/ \+0000 /, ' ').replace(/:\d\d /, ' ') : '';
+        return `<div class="x-card">
+          <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+            <span class="muted small mono">${escHtml(dateStr)}</span>
+            ${p.type ? `<span class="badge sm">${escHtml(p.type)}</span>` : ''}
+          </div>
+          <div style="color:var(--text);margin:.25rem 0">${escHtml(p.content || '')}</div>
+          ${topics ? `<div style="display:flex;flex-wrap:wrap;gap:.2rem">${topics}</div>` : ''}
+          ${p.interactions ? `<div class="muted small">${escHtml(p.interactions)}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // ── X Bookmarks ──
+  const xBookmarks = bm.x_bookmarks || [];
+  const xBmCountEl = $('x-bookmarks-count');
+  if (xBmCountEl) {
+    const isLang = _lang === 'zh';
+    const bmWindowLabel = bm.x_bookmarks_window === '24h'
+      ? (isLang ? '过去24h' : 'last 24h')
+      : (isLang ? '最近记录' : 'recent');
+    xBmCountEl.textContent = xBookmarks.length ? `${xBookmarks.length} · ${bmWindowLabel}` : '0';
+  }
+  const xBmEl = $('x-bookmarks-list');
+  if (xBmEl) {
+    if (!xBookmarks.length) {
+      xBmEl.innerHTML = `<div class="muted small">${t('no-x-data')}</div>`;
+    } else {
+      xBmEl.innerHTML = xBookmarks.map(b => {
+        const safeUrl = (b.url || '').startsWith('http') ? b.url : '';
+        return `<div class="x-card">
+          <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+            ${b.category ? `<span class="badge sm">${escHtml(b.category)}</span>` : ''}
+            <span style="color:var(--text);font-weight:600">${escHtml(b.title || '')}</span>
+          </div>
+          <div class="muted small">${escHtml(b.date || '')}${b.author ? ' · ' + escHtml(b.author) : ''}</div>
+          ${b.summary ? `<div style="color:var(--text);margin:.2rem 0">${escHtml(b.summary)}</div>` : ''}
+          ${safeUrl ? `<div><a href="${escHtml(safeUrl)}" target="_blank" rel="noopener" class="dev-link">↗ link</a></div>` : ''}
+        </div>`;
+      }).join('');
+    }
   }
 }
 
@@ -590,6 +766,35 @@ function renderTrader(trader) {
       flagEl.innerHTML = flags.map(f =>
         `<div class="list-item"><div class="item-title clr-warn">${escHtml(f)}</div></div>`
       ).join('');
+    }
+  }
+
+  const tradeActEl = $('trade-actions-list');
+  if (tradeActEl) {
+    const actions = trader.trade_actions || [];
+    if (!actions.length) {
+      tradeActEl.innerHTML = `<div class="muted small">${t('no-trade-actions')}</div>`;
+    } else {
+      tradeActEl.innerHTML = actions.map(a => {
+        const action = (a.action || '?').toLowerCase();
+        const badgeCls = action === 'buy' ? 'ok' : action === 'sell' ? 'warn' : '';
+        const tick = a.tick || '';
+        const amtStr = a.amount != null ? fmtNum(parseFloat(a.amount)) : '';
+        const usdStr = a.usd != null ? `$${fmt(a.usd)}` : '';
+        const detail = [tick, amtStr, usdStr].filter(Boolean).join(' ');
+        const txSnip = a.tx_hash ? a.tx_hash.slice(0, 16) : '';
+        return `
+        <div class="list-item">
+          <div class="item-left">
+            <span class="badge sm${badgeCls ? ' ' + badgeCls : ''}">${escHtml(action)}</span>
+            <span class="item-sub mono">${escHtml(detail)}</span>
+            ${txSnip ? `<span class="item-sub mono muted">tx:${escHtml(txSnip)}</span>` : ''}
+          </div>
+          <div class="item-right">
+            <span class="muted small">${shortTs(a.ts || '')}</span>
+          </div>
+        </div>`;
+      }).join('');
     }
   }
 }
@@ -681,241 +886,92 @@ function agentState(statusText, updatedAt) {
   return 'idle';
 }
 
-function graphNodeFill(key, state) {
-  const palette = { main: '#00d26a', bookmarker: '#58a6ff', trader: '#f0a500', dev: '#a855f7' };
-  if (state === 'idle') return 'rgba(139,148,158,0.35)';
-  return palette[key] || '#58a6ff';
+// ── Data Collection Module ────────────────────────────────────────────────
+
+function dcPill(id, status) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = status || '—';
+  el.className = 'dc-status-pill';
+  const s = String(status || '').toLowerCase();
+  if (s === 'ok' || s === 'healthy') el.classList.add('ok');
+  else if (s === 'stale') el.classList.add('stale');
+  else if (s === 'alert' || s === 'error' || s === 'fail') el.classList.add('alert');
 }
 
-function graphStatusText(state, rawStatus) {
-  if (state === 'active') return 'ACTIVE';
-  if (state === 'ok') return String(rawStatus || 'OK').toUpperCase();
-  if (state === 'warn') return 'PARTIAL';
-  if (state === 'error') return 'ERROR';
-  return 'IDLE';
-}
+async function renderDataCollection(data) {
+  const bm = data.bookmarker || {};
+  const tb = bm.topic_brief || {};
 
-function graphStatusColor(state) {
-  if (state === 'active' || state === 'ok') return '#00d26a';
-  if (state === 'warn') return '#f0a500';
-  if (state === 'error') return '#ff4d4d';
-  return '#8b949e';
-}
+  // ── Card 1: X Sync ──
+  const xSyncStatus = bm.x_sync_status || bm.source_health?.status || '—';
+  dcPill('dc-x-sync-status', xSyncStatus);
+  setText('dc-x-sync-at', bm.x_sync_at || bm.source_health?.updated_at ? shortTs(bm.x_sync_at || bm.source_health?.updated_at) : '—');
+  const okSource = Array.isArray(bm.source_health)
+    ? (bm.source_health.find(s => s.status === 'ok')?.name || '—')
+    : (bm.source_health?.name || bm.source_health?.source || '—');
+  setText('dc-x-sync-source', okSource);
+  setText('dc-x-sync-tweets',    Array.isArray(bm.x_posts)     ? bm.x_posts.length     : (bm.x_posts_count     ?? '—'));
+  setText('dc-x-sync-bookmarks', Array.isArray(bm.x_bookmarks) ? bm.x_bookmarks.length : (bm.x_bookmarks_count ?? '—'));
 
-function renderAgentGraph(data) {
-  const svg = $('agent-graph-svg');
-  const tooltip = $('agent-graph-tooltip');
-  const legend = $('agent-graph-legend');
-  if (!svg) return;
-
-  const rs = data.runtime_status || {};
-  const devStatus = (data.dev_dispatch || {}).status || {};
-  const mainStatus = rs.main || {};
-  const bmStatus = rs.bookmarker || {};
-  const traderStatus = rs.trader || {};
-
-  const nodes = {
-    bookmarker: {
-      x: 115, y: 90, r: 40, emoji: '📡', name: '文曲星', role: t('node-bm-role'),
-      status: bmStatus.status || (data.bookmarker?.source_health?.status) || '',
-      updatedAt: bmStatus.updated_at || data.bookmarker?.source_health?.updated_at || data.bookmarker?.source_health?.fetched_at || '',
-      detail: [t('node-bm-d1'), t('node-bm-d2'), t('node-bm-d3')],
-    },
-    trader: {
-      x: 115, y: 270, r: 40, emoji: '💰', name: '财神', role: t('node-trader-role'),
-      status: traderStatus.status || (data.trader?.risk_status?.status) || '',
-      updatedAt: traderStatus.updated_at || data.trader?.risk_status?.updated_at || '',
-      detail: [t('node-trader-d1'), t('node-trader-d2'), t('node-trader-d3')],
-    },
-    main: {
-      x: 290, y: 180, r: 46, emoji: '🐾', name: 'main', role: t('node-main-role'),
-      status: mainStatus.status || (data.health?.status) || '',
-      updatedAt: mainStatus.updated_at || data.health?.updated_at || data.fetched_at || '',
-      detail: [t('node-main-d1'), t('node-main-d2'), t('node-main-d3')],
-    },
-    dev: {
-      x: 465, y: 180, r: 42, emoji: '🔨', name: '鲁班', role: t('node-dev-role'),
-      status: devStatus.status || '',
-      updatedAt: devStatus.updated_at || devStatus.started_at || '',
-      detail: [t('node-dev-d1'), t('node-dev-d2'), t('node-dev-d3')],
-    },
-  };
-
-  Object.entries(nodes).forEach(([key, node]) => {
-    node.key = key;
-    node.state = agentState(node.status, node.updatedAt);
-    node.fill = graphNodeFill(key, node.state);
-  });
-
-  const edges = [
-    { from: 'bookmarker', to: 'main', type: 'data', lines: [t('edge-topic-brief'), t('edge-content-candidates'), t('edge-tas-social')] },
-    { from: 'trader', to: 'main', type: 'data', lines: [t('edge-wallet-snapshot'), t('edge-reward-status'), t('edge-tas-trade')] },
-    { from: 'main', to: 'bookmarker', type: 'command', lines: [t('edge-guidance'), t('edge-topic-priority')] },
-    { from: 'main', to: 'trader', type: 'command', lines: [t('edge-treasury-policy'), t('edge-risk-mode')] },
-    { from: 'main', to: 'dev', type: 'command', lines: [t('edge-task-json'), t('edge-impl-request')] },
-    { from: 'dev', to: 'main', type: 'data', lines: [t('edge-result-json'), t('edge-completion-feedback')] },
-  ].map((edge, idx) => ({ ...edge, id: `edge-${idx}` }));
-
-  const ns = 'http://www.w3.org/2000/svg';
-  svg.innerHTML = '';
-
-  const defs = document.createElementNS(ns, 'defs');
-  defs.innerHTML = `
-    <marker id="arrow-data" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L10,5 L0,10 z" fill="#58a6ff"></path>
-    </marker>
-    <marker id="arrow-command" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L10,5 L0,10 z" fill="#f0a500"></path>
-    </marker>`;
-  svg.appendChild(defs);
-
-  const edgeGroup = document.createElementNS(ns, 'g');
-  const nodeGroup = document.createElementNS(ns, 'g');
-  svg.appendChild(edgeGroup);
-  svg.appendChild(nodeGroup);
-
-  edges.forEach(edge => {
-    const s = nodes[edge.from];
-    const tgt = nodes[edge.to];
-    const dx = tgt.x - s.x;
-    const dir = dx >= 0 ? 1 : -1;
-    const startX = s.x + dir * (s.r + 4);
-    const endX = tgt.x - dir * (tgt.r + 4);
-    const startY = s.y;
-    const endY = tgt.y;
-    const curve = Math.max(26, Math.abs(dx) * 0.18);
-    const ctrl1X = startX + dir * curve;
-    const ctrl2X = endX - dir * curve;
-    const offsetY = edge.from === 'main' && edge.to === 'dev' ? -24 : edge.from === 'dev' ? 24 : 0;
-    const d = `M ${startX} ${startY} C ${ctrl1X} ${startY + offsetY}, ${ctrl2X} ${endY + offsetY}, ${endX} ${endY}`;
-
-    const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', d);
-    path.setAttribute('class', `graph-edge ${edge.type}`);
-    path.setAttribute('marker-end', `url(#arrow-${edge.type})`);
-    path.dataset.edgeId = edge.id;
-    edgeGroup.appendChild(path);
-
-    const midX = (startX + endX + ctrl1X + ctrl2X) / 4;
-    const midY = (startY + endY) / 2 + offsetY + (edge.type === 'command' ? -10 : 10);
-    const label = document.createElementNS(ns, 'text');
-    label.setAttribute('x', midX);
-    label.setAttribute('y', midY);
-    label.setAttribute('class', 'graph-edge-label');
-    label.dataset.edgeId = edge.id;
-    edge.lines.forEach((line, i) => {
-      const tspan = document.createElementNS(ns, 'tspan');
-      tspan.setAttribute('x', midX);
-      if (i === 0) tspan.setAttribute('dy', '0');
-      else tspan.setAttribute('dy', '12');
-      tspan.textContent = line;
-      label.appendChild(tspan);
-    });
-    edgeGroup.appendChild(label);
-  });
-
-  Object.values(nodes).forEach(node => {
-    const g = document.createElementNS(ns, 'g');
-    g.setAttribute('class', `graph-node ${node.state === 'idle' ? 'dimmed' : ''} ${node.state === 'active' ? 'active' : ''}`.trim());
-    g.dataset.node = node.key;
-
-    const circle = document.createElementNS(ns, 'circle');
-    circle.setAttribute('cx', node.x);
-    circle.setAttribute('cy', node.y);
-    circle.setAttribute('r', node.r);
-    circle.setAttribute('fill', node.fill);
-    circle.setAttribute('class', node.state === 'active' ? 'pulse' : '');
-    g.appendChild(circle);
-
-    const emoji = document.createElementNS(ns, 'text');
-    emoji.setAttribute('x', node.x);
-    emoji.setAttribute('y', node.y);
-    emoji.setAttribute('class', 'graph-node-emoji');
-    emoji.textContent = node.emoji;
-    g.appendChild(emoji);
-
-    const name = document.createElementNS(ns, 'text');
-    name.setAttribute('x', node.x);
-    name.setAttribute('y', node.y + node.r + 18);
-    name.setAttribute('class', 'graph-node-name');
-    name.textContent = node.name;
-    g.appendChild(name);
-
-    const role = document.createElementNS(ns, 'text');
-    role.setAttribute('x', node.x);
-    role.setAttribute('y', node.y + node.r + 33);
-    role.setAttribute('class', 'graph-node-role');
-    role.textContent = node.role;
-    g.appendChild(role);
-
-    const status = document.createElementNS(ns, 'text');
-    status.setAttribute('x', node.x);
-    status.setAttribute('y', node.y - node.r - 12);
-    status.setAttribute('class', 'graph-node-status');
-    status.setAttribute('fill', graphStatusColor(node.state));
-    status.textContent = graphStatusText(node.state, node.status);
-    g.appendChild(status);
-
-    g.addEventListener('mouseenter', ev => showGraphTooltip(ev, node, edges, tooltip));
-    g.addEventListener('mousemove', ev => moveGraphTooltip(ev, tooltip));
-    g.addEventListener('mouseleave', () => hideGraphTooltip(tooltip));
-    g.addEventListener('mouseenter', () => highlightGraph(node.key, edges, true));
-    g.addEventListener('mouseleave', () => highlightGraph(node.key, edges, false));
-
-    nodeGroup.appendChild(g);
-  });
-
-  if (legend) {
-    legend.innerHTML = `
-      <span class="graph-legend-item"><span class="graph-legend-line"></span> ${t('legend-data')}</span>
-      <span class="graph-legend-item"><span class="graph-legend-line command"></span> ${t('legend-command')}</span>
-      <span class="graph-legend-item"><span class="mono">pulse</span> ${t('legend-pulse')}</span>`;
+  // ── Card 2: Data Alignment (tas-social) ──
+  try {
+    const tasSocial = await fetchJSON('/api/runtime/bookmarker/tas-social.json');
+    dcPill('dc-alignment-status', tasSocial.status || tasSocial.x_sync_status || 'ok');
+    setText('dc-alignment-tas',       fmt(tasSocial.tas_social ?? tasSocial.value));
+    setText('dc-alignment-score',     fmt(tasSocial.align_score));
+    setText('dc-alignment-community', fmt(tasSocial.community_score));
+  } catch (_) {
+    const tas = (data.main || {}).tas_latest || {};
+    dcPill('dc-alignment-status', tas.tas_social != null ? 'ok' : '—');
+    setText('dc-alignment-tas',       fmt(tas.tas_social));
+    setText('dc-alignment-score',     tb.align_score != null ? fmt(tb.align_score) : '—');
+    setText('dc-alignment-community', tb.community_score != null ? fmt(tb.community_score) : '—');
   }
-}
 
-function highlightGraph(nodeKey, edges, on) {
-  const related = new Set(edges.filter(e => e.from === nodeKey || e.to === nodeKey).map(e => e.id));
-  document.querySelectorAll('.graph-node').forEach(el => {
-    const active = el.dataset.node === nodeKey;
-    el.classList.toggle('hover', on && active);
-    el.classList.toggle('dimmed', on && !active);
-  });
-  document.querySelectorAll('.graph-edge, .graph-edge-label').forEach(el => {
-    const belongs = related.has(el.dataset.edgeId);
-    el.classList.toggle('dimmed', on && !belongs);
-  });
-}
+  // ── Card 3: Community Engagement ──
+  try {
+    const cs = await fetchJSON('/api/runtime/bookmarker/community-scan.json');
+    dcPill('dc-community-status', cs.status || 'ok');
+    setText('dc-community-score',   fmt(cs.community_score));
+    setText('dc-community-scanned', cs.scanned_at ? shortTs(cs.scanned_at) : '—');
+    setText('dc-community-posts',   cs.posts_scanned ?? cs.post_count ?? '—');
+    setText('dc-community-source',  cs.source || cs.community || '—');
+  } catch (_) {
+    dcPill('dc-community-status', '—');
+  }
 
-function showGraphTooltip(ev, node, edges, tooltip) {
-  if (!tooltip) return;
-  const related = edges.filter(e => e.from === node.key || e.to === node.key);
-  const updated = node.updatedAt ? shortTs(node.updatedAt) : '—';
-  tooltip.innerHTML = `
-    <div class="title">${escHtml(node.name)} · ${escHtml(node.role)}</div>
-    <div>${t('tooltip-status')}: <span class="mono">${escHtml(graphStatusText(node.state, node.status))}</span></div>
-    <div>${t('tooltip-last-update')}: <span class="mono">${escHtml(updated)}</span></div>
-    <div class="sub">${node.detail.map(escHtml).join(' · ')}</div>
-    <div class="sub">${t('tooltip-flows')}: ${related.map(e => escHtml(`${e.from} → ${e.to}`)).join(' / ')}</div>`;
-  tooltip.classList.remove('hidden');
-  moveGraphTooltip(ev, tooltip);
-}
+  // ── Card 4: Monitor Daily Community Overviews ──
+  try {
+    const mon = await fetchJSON('/api/monitor/steemit');
+    const stale = mon.stale === true || mon.stale === 'true';
+    dcPill('dc-monitor-status', stale ? 'alert' : 'ok');
+    const title = mon.latest_post_title || mon.title || '—';
+    setText('dc-monitor-latest-post', title.length > 40 ? title.slice(0, 40) + '…' : title);
+    setText('dc-monitor-age',   mon.latest_post_age_hours != null ? mon.latest_post_age_hours + 'h' : '—');
+    setText('dc-monitor-stale', stale ? 'yes' : 'no');
+  } catch (_) {
+    dcPill('dc-monitor-status', '—');
+  }
 
-function moveGraphTooltip(ev, tooltip) {
-  if (!tooltip) return;
-  const parent = tooltip.parentElement;
-  if (!parent) return;
-  const rect = parent.getBoundingClientRect();
-  const left = Math.min(rect.width - 230, Math.max(12, ev.clientX - rect.left + 14));
-  const top = Math.min(rect.height - 110, Math.max(12, ev.clientY - rect.top + 14));
-  tooltip.style.left = `${left}px`;
-  tooltip.style.top = `${top}px`;
-}
-
-function hideGraphTooltip(tooltip) {
-  if (!tooltip) return;
-  tooltip.classList.add('hidden');
-  document.querySelectorAll('.graph-node').forEach(el => el.classList.remove('hover', 'dimmed'));
-  document.querySelectorAll('.graph-edge, .graph-edge-label').forEach(el => el.classList.remove('dimmed'));
+  // ── Card 5: Trending News ──
+  const trendEl = $('dc-trending-list');
+  if (trendEl) {
+    const keywords = tb.keywords || [];
+    let ticks = [];
+    try {
+      const trend = await fetchJSON('/api/runtime/bookmarker/x-trend-latest.json');
+      ticks = trend.ticks || trend.keywords || trend.trending || [];
+    } catch (_) {}
+    const all = [...new Set([...keywords, ...ticks])].slice(0, 20);
+    if (all.length) {
+      dcPill('dc-trending-status', 'ok');
+      trendEl.innerHTML = all.map(k => `<span class="dc-tag">#${escHtml(String(k))}</span>`).join('');
+    } else {
+      dcPill('dc-trending-status', '—');
+      trendEl.innerHTML = '<span class="muted small">—</span>';
+    }
+  }
 }
 
 // ── Timeline ──────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TagClawX · Agent Dashboard</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260327j" />
+  <link rel="stylesheet" href="/static/style.css?v=20260330a" />
 </head>
 <body>
 
@@ -96,9 +96,39 @@
     <div id="bm-headline" class="text-block">—</div>
     <div id="bm-keywords" class="tags-row"></div>
 
-    <div class="section-label" data-i18n="section-content-candidates">Content Candidates</div>
-    <div id="bm-cands-count" class="muted small">—</div>
-    <div id="bm-cands-list" class="list-block">—</div>
+    <div class="x-section-header">
+      <span class="section-label" data-i18n="section-x-sync">X Sync</span>
+      <span id="x-sync-badge" class="badge sm">—</span>
+      <span id="x-sync-at-text" class="muted small mono">—</span>
+    </div>
+
+    <div class="x-section-header" onclick="toggleXSection('x-posts')">
+      <span class="section-label" data-i18n="section-x-posts">X 帖子</span>
+      <span id="x-posts-count" class="badge sm">0</span>
+      <button class="x-toggle-btn" id="x-posts-toggle">▼</button>
+    </div>
+    <div class="x-collapsible" id="x-posts-list"></div>
+
+    <div class="x-section-header" onclick="toggleXSection('x-bookmarks')">
+      <span class="section-label" data-i18n="section-x-bookmarks">X 收藏</span>
+      <span id="x-bookmarks-count" class="badge sm">0</span>
+      <button class="x-toggle-btn" id="x-bookmarks-toggle">▼</button>
+    </div>
+    <div class="x-collapsible" id="x-bookmarks-list"></div>
+
+    <div class="x-section-header" onclick="toggleSection('bm-cands')">
+      <span class="section-label" data-i18n="section-content-candidates">Content Candidates</span>
+      <span id="bm-cands-count" class="muted small"></span>
+      <button id="bm-cands-toggle" class="x-toggle-btn">▼</button>
+    </div>
+    <div id="bm-cands-collapsible" class="x-collapsible">
+      <div id="bm-cands-list" class="list-block">—</div>
+    </div>
+
+    <div class="section-label" data-i18n="section-social-actions">Social Actions</div>
+    <div id="bm-actions-wrapper" class="actions-scroll-wrapper">
+      <div id="bm-actions-list" class="list-block">—</div>
+    </div>
   </section>
 
   <!-- ── Trader Agent ── -->
@@ -122,8 +152,18 @@
       </div>
     </div>
 
-    <div class="section-label" data-i18n="section-risk-flags">Risk Flags</div>
-    <div id="trader-risk-flags" class="list-block muted small">—</div>
+    <div class="x-section-header" onclick="toggleSection('risk-flags')">
+      <span class="section-label" data-i18n="section-risk-flags">Risk Flags</span>
+      <button id="risk-flags-toggle" class="x-toggle-btn">▼</button>
+    </div>
+    <div id="risk-flags-collapsible" class="x-collapsible">
+      <div id="trader-risk-flags" class="list-block muted small">—</div>
+    </div>
+
+    <div class="section-label" data-i18n="section-trade-actions">Trade Actions</div>
+    <div id="trade-actions-wrapper" class="actions-scroll-wrapper">
+      <div id="trade-actions-list" class="list-block">—</div>
+    </div>
   </section>
 
   <!-- ── Claude Dispatch / 鲁班 ── -->
@@ -153,17 +193,137 @@
 <!-- ═══════════════════════════════════════════ LOWER PANELS ══ -->
 <section id="lower-panels">
   <section id="timeline-section" class="lower-panel">
-    <h2 class="section-heading"><span data-i18n="section-timeline">Timeline</span> <span id="timeline-count" class="muted small"></span></h2>
-    <div id="timeline-list" class="timeline"></div>
+    <h2 class="section-heading"><span data-i18n="section-timeline">Timeline</span> <span id="timeline-count" class="muted small"></span> <span class="muted small" data-i18n="timeline-filter-note">Completed actions only</span></h2>
+    <div id="timeline-list-wrapper">
+      <div id="timeline-list" class="timeline"></div>
+    </div>
   </section>
 
-  <section id="agent-graph-section" class="lower-panel">
-    <h2 class="section-heading" data-i18n="section-graph">Agent Collaboration Graph</h2>
-    <div class="agent-graph-container card-shell">
-      <svg id="agent-graph-svg" viewBox="0 0 560 360" aria-label="Agent collaboration graph"></svg>
-      <div id="agent-graph-tooltip" class="graph-tooltip hidden"></div>
+  <section id="data-collection-section" class="lower-panel">
+    <h2 class="section-heading" data-i18n="section-data-collection">Data Collection</h2>
+    <div class="data-collection-grid">
+
+      <!-- 1. X SYNC -->
+      <div class="dc-card card-shell" id="dc-x-sync">
+        <div class="dc-card-header">
+          <span class="dc-icon">🐦</span>
+          <span class="dc-title" data-i18n="dc-x-sync">X Sync</span>
+          <span class="dc-status-pill" id="dc-x-sync-status">—</span>
+        </div>
+        <div class="dc-card-body">
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-last-sync">Last Sync</span>
+            <span class="dc-value" id="dc-x-sync-at">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-source">Source</span>
+            <span class="dc-value" id="dc-x-sync-source">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-tweets">Tweets</span>
+            <span class="dc-value" id="dc-x-sync-tweets">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-bookmarks">Bookmarks</span>
+            <span class="dc-value" id="dc-x-sync-bookmarks">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Data Alignment by 0xNought -->
+      <div class="dc-card card-shell" id="dc-alignment">
+        <div class="dc-card-header">
+          <span class="dc-icon">🎯</span>
+          <span class="dc-title" data-i18n="dc-alignment">Data Alignment by 0xNought</span>
+          <span class="dc-status-pill" id="dc-alignment-status">—</span>
+        </div>
+        <div class="dc-card-body">
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-tas-social">TAS_social</span>
+            <span class="dc-value" id="dc-alignment-tas">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-align-score">Align Score</span>
+            <span class="dc-value" id="dc-alignment-score">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-community-score">Community Score</span>
+            <span class="dc-value" id="dc-alignment-community">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-window">Window</span>
+            <span class="dc-value">24h rolling</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Community Engagement Data -->
+      <div class="dc-card card-shell" id="dc-community">
+        <div class="dc-card-header">
+          <span class="dc-icon">🌐</span>
+          <span class="dc-title" data-i18n="dc-community">Community Engagement Data</span>
+          <span class="dc-status-pill" id="dc-community-status">—</span>
+        </div>
+        <div class="dc-card-body">
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-community-score-val">Community Score</span>
+            <span class="dc-value" id="dc-community-score">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-scanned-at">Scanned At</span>
+            <span class="dc-value" id="dc-community-scanned">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-posts-scanned">Posts Scanned</span>
+            <span class="dc-value" id="dc-community-posts">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-source-label">Source</span>
+            <span class="dc-value" id="dc-community-source">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Monitor Daily Community Overviews -->
+      <div class="dc-card card-shell" id="dc-monitor">
+        <div class="dc-card-header">
+          <span class="dc-icon">📊</span>
+          <span class="dc-title" data-i18n="dc-monitor">Monitor Daily Community Overviews</span>
+          <span class="dc-status-pill" id="dc-monitor-status">—</span>
+        </div>
+        <div class="dc-card-body">
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-monitor-community">Community</span>
+            <span class="dc-value" id="dc-monitor-community">hive-150943</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-monitor-latest-post">Latest Post</span>
+            <span class="dc-value" id="dc-monitor-latest-post">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-monitor-age">Age</span>
+            <span class="dc-value" id="dc-monitor-age">—</span>
+          </div>
+          <div class="dc-stat">
+            <span class="dc-label" data-i18n="dc-monitor-stale">Stale</span>
+            <span class="dc-value" id="dc-monitor-stale">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. Trending News -->
+      <div class="dc-card card-shell dc-card-wide" id="dc-trending">
+        <div class="dc-card-header">
+          <span class="dc-icon">🔥</span>
+          <span class="dc-title" data-i18n="dc-trending">Trending News</span>
+          <span class="dc-status-pill" id="dc-trending-status">—</span>
+        </div>
+        <div class="dc-card-body">
+          <div id="dc-trending-list" class="dc-trending-list">—</div>
+        </div>
+      </div>
+
     </div>
-    <div id="agent-graph-legend" class="graph-legend"></div>
   </section>
 
   <section id="feedback-loop-section" class="lower-panel">
@@ -176,9 +336,9 @@
           </marker>
           <!-- Path definitions for animated dots -->
           <path id="fl-path-m2b" d="M 280 116 Q 120 180 130 296" fill="none"/>
-          <path id="fl-path-b2m" d="M 130 296 Q 120 180 280 244" fill="none"/>
+          <path id="fl-path-b2m" d="M 130 296 Q 120 180 280 142" fill="none"/>
           <path id="fl-path-m2t" d="M 280 116 Q 440 180 430 296" fill="none"/>
-          <path id="fl-path-t2m" d="M 430 296 Q 440 180 280 244" fill="none"/>
+          <path id="fl-path-t2m" d="M 430 296 Q 440 180 280 142" fill="none"/>
         </defs>
 
         <!-- ── Edges ── -->
@@ -188,7 +348,7 @@
         <text x="180" y="197" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.55)" data-i18n="fl-edge-tas-social">TAS_social</text>
 
         <!-- bookmarker → main -->
-        <path d="M 130 296 Q 120 180 280 244" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#fl-arrow)"/>
+        <path d="M 130 296 Q 120 180 280 142" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#fl-arrow)"/>
         <rect x="116" y="238" width="110" height="16" rx="4" fill="rgba(13,17,23,0.8)"/>
         <text x="171" y="250" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.55)" data-i18n="fl-edge-topic-brief">topic-brief</text>
 
@@ -198,7 +358,7 @@
         <text x="390" y="197" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.55)" data-i18n="fl-edge-treasury-policy">treasury-policy</text>
 
         <!-- trader → main -->
-        <path d="M 430 296 Q 440 180 280 244" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#fl-arrow)"/>
+        <path d="M 430 296 Q 440 180 280 142" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#fl-arrow)"/>
         <rect x="334" y="238" width="106" height="16" rx="4" fill="rgba(13,17,23,0.8)"/>
         <text x="387" y="250" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.55)" data-i18n="fl-edge-reward-status">reward-status</text>
 
@@ -247,6 +407,6 @@
 
 <div id="error-bar" class="error-bar hidden"></div>
 
-<script src="/static/app.js?v=20260327j"></script>
+<script src="/static/app.js?v=20260330a"></script>
 </body>
 </html>
