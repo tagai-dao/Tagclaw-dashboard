@@ -568,7 +568,6 @@ function renderBookmarker(bm) {
   const auto  = bm.autonomy_intent     || {};
 
   const xSync = src.x_sync || {};
-  setBadge('bm-sync-status', xSync.status || src.status || '—');
   setText('bm-sync-at', shortTs(xSync.fetched_at || src.fetched_at || src.updated_at));
 
   const autoMode = auto.mode || auto.autonomy_mode || '—';
@@ -618,16 +617,6 @@ function renderBookmarker(bm) {
       }).join('');
     }
   }
-
-  // ── X Sync status ──
-  const xSyncStatus = bm.x_sync_status || '—';
-  const xSyncAt = bm.x_sync_at || '';
-  const syncBadge = $('x-sync-badge');
-  if (syncBadge) {
-    syncBadge.textContent = xSyncStatus;
-    syncBadge.className = 'badge sm ' + (statusClass(xSyncStatus) || '');
-  }
-  setText('x-sync-at-text', xSyncAt ? shortTs(xSyncAt) : '—');
 
   // ── X Posts ──
   const xPosts = bm.x_posts || [];
@@ -886,6 +875,27 @@ function agentState(statusText, updatedAt) {
   return 'idle';
 }
 
+// ── Data Alignment by 0xNought ────────────────────────────────────────────
+
+function renderDataAlignment(data) {
+  const rec = (data.bookmarker?.twin_recognition?.alignment) || {};
+  const level = rec.level ?? '—';
+  const score = rec.total_score ?? '—';
+  const interactions = rec.interactions_count ?? '—';
+  const lastAt = rec.last_interaction_at ? shortTs(rec.last_interaction_at) : '—';
+
+  setText('dc-alignment-level', level);
+  setText('dc-alignment-score', score);
+  setText('dc-alignment-interactions', interactions);
+  setText('dc-alignment-last', lastAt);
+
+  const pill = $('dc-alignment-status');
+  if (pill) {
+    pill.textContent = level !== '—' ? `Level ${level}` : '—';
+    pill.className = 'dc-status-pill ' + (level === 3 ? 'ok' : level === 2 ? 'stale' : '');
+  }
+}
+
 // ── Data Collection Module ────────────────────────────────────────────────
 
 function dcPill(id, status) {
@@ -914,20 +924,8 @@ async function renderDataCollection(data) {
   setText('dc-x-sync-tweets',    Array.isArray(bm.x_posts)     ? bm.x_posts.length     : (bm.x_posts_count     ?? '—'));
   setText('dc-x-sync-bookmarks', Array.isArray(bm.x_bookmarks) ? bm.x_bookmarks.length : (bm.x_bookmarks_count ?? '—'));
 
-  // ── Card 2: Data Alignment (tas-social) ──
-  try {
-    const tasSocial = await fetchJSON('/api/runtime/bookmarker/tas-social.json');
-    dcPill('dc-alignment-status', tasSocial.status || tasSocial.x_sync_status || 'ok');
-    setText('dc-alignment-tas',       fmt(tasSocial.tas_social ?? tasSocial.value));
-    setText('dc-alignment-score',     fmt(tasSocial.align_score));
-    setText('dc-alignment-community', fmt(tasSocial.community_score));
-  } catch (_) {
-    const tas = (data.main || {}).tas_latest || {};
-    dcPill('dc-alignment-status', tas.tas_social != null ? 'ok' : '—');
-    setText('dc-alignment-tas',       fmt(tas.tas_social));
-    setText('dc-alignment-score',     tb.align_score != null ? fmt(tb.align_score) : '—');
-    setText('dc-alignment-community', tb.community_score != null ? fmt(tb.community_score) : '—');
-  }
+  // ── Card 2: Data Alignment by 0xNought ──
+  renderDataAlignment(data);
 
   // ── Card 3: Community Engagement ──
   try {

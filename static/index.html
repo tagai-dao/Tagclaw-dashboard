@@ -87,7 +87,6 @@
     <h2 class="card-title" data-i18n="panel-bookmarker">Bookmarker Agent</h2>
 
     <div class="row compact">
-      <div class="kv"><span class="k" data-i18n="label-x-sync">X Sync</span><span id="bm-sync-status" class="badge sm">—</span></div>
       <div class="kv"><span class="k" data-i18n="label-last-sync">Last Sync</span><span class="v mono" id="bm-sync-at">—</span></div>
       <div class="kv"><span class="k" data-i18n="label-mode">Mode</span><span id="bm-mode-badge" class="badge sm">—</span></div>
     </div>
@@ -95,26 +94,6 @@
     <div class="section-label" data-i18n="section-topic-brief">Topic Brief</div>
     <div id="bm-headline" class="text-block">—</div>
     <div id="bm-keywords" class="tags-row"></div>
-
-    <div class="x-section-header">
-      <span class="section-label" data-i18n="section-x-sync">X Sync</span>
-      <span id="x-sync-badge" class="badge sm">—</span>
-      <span id="x-sync-at-text" class="muted small mono">—</span>
-    </div>
-
-    <div class="x-section-header" onclick="toggleXSection('x-posts')">
-      <span class="section-label" data-i18n="section-x-posts">X 帖子</span>
-      <span id="x-posts-count" class="badge sm">0</span>
-      <button class="x-toggle-btn" id="x-posts-toggle">▼</button>
-    </div>
-    <div class="x-collapsible" id="x-posts-list"></div>
-
-    <div class="x-section-header" onclick="toggleXSection('x-bookmarks')">
-      <span class="section-label" data-i18n="section-x-bookmarks">X 收藏</span>
-      <span id="x-bookmarks-count" class="badge sm">0</span>
-      <button class="x-toggle-btn" id="x-bookmarks-toggle">▼</button>
-    </div>
-    <div class="x-collapsible" id="x-bookmarks-list"></div>
 
     <div class="x-section-header" onclick="toggleSection('bm-cands')">
       <span class="section-label" data-i18n="section-content-candidates">Content Candidates</span>
@@ -204,7 +183,7 @@
     <div class="data-collection-grid">
 
       <!-- 1. X SYNC -->
-      <div class="dc-card card-shell" id="dc-x-sync">
+      <div class="dc-card card-shell dc-card-wide" id="dc-x-sync">
         <div class="dc-card-header">
           <span class="dc-icon">🐦</span>
           <span class="dc-title" data-i18n="dc-x-sync">X Sync</span>
@@ -228,6 +207,18 @@
             <span class="dc-value" id="dc-x-sync-bookmarks">—</span>
           </div>
         </div>
+        <div class="x-section-header" onclick="toggleXSection('x-posts')">
+          <span class="section-label" data-i18n="section-x-posts">X 帖子</span>
+          <span id="x-posts-count" class="badge sm">0</span>
+          <button class="x-toggle-btn" id="x-posts-toggle">▼</button>
+        </div>
+        <div class="x-collapsible" id="x-posts-list"></div>
+        <div class="x-section-header" onclick="toggleXSection('x-bookmarks')">
+          <span class="section-label" data-i18n="section-x-bookmarks">X 收藏</span>
+          <span id="x-bookmarks-count" class="badge sm">0</span>
+          <button class="x-toggle-btn" id="x-bookmarks-toggle">▼</button>
+        </div>
+        <div class="x-collapsible" id="x-bookmarks-list"></div>
       </div>
 
       <!-- 2. Data Alignment by 0xNought -->
@@ -239,20 +230,20 @@
         </div>
         <div class="dc-card-body">
           <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-tas-social">TAS_social</span>
-            <span class="dc-value" id="dc-alignment-tas">—</span>
+            <span class="dc-label">Alignment Level</span>
+            <span class="dc-value" id="dc-alignment-level">—</span>
           </div>
           <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-align-score">Align Score</span>
+            <span class="dc-label">Total Score</span>
             <span class="dc-value" id="dc-alignment-score">—</span>
           </div>
           <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-community-score">Community Score</span>
-            <span class="dc-value" id="dc-alignment-community">—</span>
+            <span class="dc-label">Interactions</span>
+            <span class="dc-value" id="dc-alignment-interactions">—</span>
           </div>
           <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-window">Window</span>
-            <span class="dc-value">24h rolling</span>
+            <span class="dc-label">Last Interaction</span>
+            <span class="dc-value" id="dc-alignment-last">—</span>
           </div>
         </div>
       </div>

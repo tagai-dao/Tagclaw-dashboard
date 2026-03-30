@@ -336,6 +336,16 @@ def _parse_x_bookmarks(hours: int = 168, limit: int = 20) -> list[dict]:
     return result[:limit]
 
 
+def _load_twin_recognition() -> dict:
+    path = WORKSPACE / 'memory' / 'twin-recognition.json'
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
 def _load_x_sync() -> dict:
     """Read memory/x-sync-latest.json → {status, fetched_at}."""
     path = WORKSPACE / "memory" / "x-sync-latest.json"
@@ -516,6 +526,7 @@ def api_status():
             "x_bookmarks_window":   "24h" if _xb and _xb[0].get("date") and
                                     _is_within_hours(_xb[0].get("date",""), 24) else "recent",
             **_load_x_sync(),
+            "twin_recognition": _load_twin_recognition(),
         },
         "trader": {
             "wallet_snapshot":   wallet,
