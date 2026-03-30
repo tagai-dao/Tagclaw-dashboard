@@ -499,12 +499,37 @@ function renderTasHistory(history, tas) {
   }).join('');
 }
 
+function renderSocialActionsList(elId, actions) {
+  const actionsEl = $(elId);
+  if (!actionsEl) return;
+  if (!actions || !actions.length) {
+    actionsEl.innerHTML = `<div class="muted small">${t('no-social-actions')}</div>`;
+    return;
+  }
+  actionsEl.innerHTML = actions.map(a => {
+    const typeBadgeCls = statusClass(a.result_status || '');
+    const target = String(a.target_key || a.tweet_id || a.url || '').slice(0, 40);
+    return `
+    <div class="list-item">
+      <div class="item-left">
+        <span class="badge sm${typeBadgeCls ? ' ' + typeBadgeCls : ''}">${escHtml(a.type || '?')}</span>
+        ${target ? `<span class="item-sub mono">${escHtml(target)}</span>` : ''}
+      </div>
+      <div class="item-right">
+        ${a.result_status ? `<span class="badge sm ${statusClass(a.result_status)}">${escHtml(a.result_status)}</span>` : ''}
+        <span class="muted small">${shortTs(a.executed_at || a.ts || '')}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 // ── Main Panel ──
 function renderMain(main) {
-  const ip  = main.input_packet  || {};
-  const tas = main.tas_latest    || {};
-  const dec = main.last_decision || {};
-  const si  = main.social_intent || {};
+  const ip  = main.input_packet   || {};
+  const tas = main.tas_latest     || {};
+  const dec = main.last_decision  || {};
+  const si  = main.social_intent  || {};
+  const sa  = main.social_actions || [];
   const sum = ip.summary || {};
 
   const op = sum.op ?? null;
@@ -542,6 +567,8 @@ function renderMain(main) {
       })));
     }
   }
+
+  renderSocialActionsList('main-actions-list', sa);
 }
 
 // ── X Section Toggle ──
@@ -630,29 +657,7 @@ function renderBookmarker(bm) {
     }
   }
 
-  const actionsEl = $('bm-actions-list');
-  if (actionsEl) {
-    const actions = bm.social_actions || [];
-    if (!actions.length) {
-      actionsEl.innerHTML = `<div class="muted small">${t('no-social-actions')}</div>`;
-    } else {
-      actionsEl.innerHTML = actions.map(a => {
-        const typeBadgeCls = statusClass(a.result_status || '');
-        const target = String(a.target_key || a.tweet_id || a.url || '').slice(0, 40);
-        return `
-        <div class="list-item">
-          <div class="item-left">
-            <span class="badge sm${typeBadgeCls ? ' ' + typeBadgeCls : ''}">${escHtml(a.type || '?')}</span>
-            ${target ? `<span class="item-sub mono">${escHtml(target)}</span>` : ''}
-          </div>
-          <div class="item-right">
-            ${a.result_status ? `<span class="badge sm ${statusClass(a.result_status)}">${escHtml(a.result_status)}</span>` : ''}
-            <span class="muted small">${shortTs(a.executed_at || a.ts || '')}</span>
-          </div>
-        </div>`;
-      }).join('');
-    }
-  }
+  renderSocialActionsList('bm-actions-list', bm.social_actions || []);
 
   // ── X Posts ──
   const xPosts = bm.x_posts || [];

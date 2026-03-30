@@ -530,11 +530,12 @@ def api_status():
         "runtime_status": runtime_status,
         "health": health,
         "main": {
-            "input_packet":  input_pkt,
-            "tas_latest":    tas_latest,
-            "tas_history":   tas_history,
-            "last_decision": last_dec,
-            "social_intent": social_int,
+            "input_packet":   input_pkt,
+            "tas_latest":     tas_latest,
+            "tas_history":    tas_history,
+            "last_decision":  last_dec,
+            "social_intent":  social_int,
+            "social_actions": list(reversed((social_hist.get("items") or [])[-20:])),
         },
         "bookmarker": {
             "topic_brief":          topic_brief,
