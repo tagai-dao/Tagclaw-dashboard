@@ -132,6 +132,7 @@ const I18N = {
     'label-dev-completed': '完成时间',
     'section-dev-summary': '任务摘要',
     'section-dev-files': '变更文件',
+    'section-social-drafts': '社交草稿',
     'section-social-actions': '策展动作历史',
     'no-social-actions': '暂无动作记录',
     'timeline-filter-note': '仅显示已完成动作',
@@ -271,6 +272,7 @@ const I18N = {
     'label-dev-completed': 'Completed',
     'section-dev-summary': 'Task Summary',
     'section-dev-files': 'Files Changed',
+    'section-social-drafts': 'Social Drafts',
     'section-social-actions': 'Social Actions',
     'no-social-actions': 'No actions yet',
     'timeline-filter-note': 'Completed actions only',
@@ -592,6 +594,40 @@ function renderBookmarker(bm) {
         right: c.score != null ? fmt(c.score) : '',
       }))
     );
+  }
+
+  // Social Drafts
+  const draftsObj = bm.social_drafts || {};
+  const drafts = draftsObj.drafts || [];
+  const draftsMeta = draftsObj.meta || {};
+  setText('bm-drafts-count', drafts.length ? `(${drafts.length})` : '');
+  const draftsStatusEl = $('bm-drafts-status');
+  if (draftsStatusEl) {
+    draftsStatusEl.textContent = draftsObj.status || '—';
+    draftsStatusEl.className = 'badge sm ' + statusClass(draftsObj.status || '');
+  }
+  const draftsEl = $('bm-drafts-list');
+  if (draftsEl) {
+    if (!drafts.length) {
+      draftsEl.innerHTML = '<div class="muted small">No drafts available</div>';
+    } else {
+      draftsEl.innerHTML = drafts.map(d => {
+        const txt = (d.text || '').slice(0, 100) + ((d.text || '').length > 100 ? '…' : '');
+        const pickerInfo = draftsMeta.picker_source ? ` · picker: ${draftsMeta.picker_source}` : '';
+        return `
+        <div class="list-item">
+          <div class="item-left">
+            <span class="badge sm">${escHtml(d.type || '?')}</span>
+            <span class="badge sm muted">${escHtml(d.tick || '')}</span>
+            <span class="item-sub">${escHtml(d.theme || '')}</span>
+          </div>
+          <div class="item-right">
+            <span class="muted small">p${d.priority || 0}${pickerInfo}</span>
+          </div>
+        </div>
+        <div class="muted small" style="padding: 2px 8px 6px; font-size: 0.72em; line-height: 1.4;">${escHtml(txt)}</div>`;
+      }).join('');
+    }
   }
 
   const actionsEl = $('bm-actions-list');
