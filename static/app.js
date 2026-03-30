@@ -917,9 +917,8 @@ async function renderDataCollection(data) {
   const xSyncStatus = bm.x_sync_status || bm.source_health?.status || '—';
   dcPill('dc-x-sync-status', xSyncStatus);
   setText('dc-x-sync-at', bm.x_sync_at || bm.source_health?.updated_at ? shortTs(bm.x_sync_at || bm.source_health?.updated_at) : '—');
-  const okSource = Array.isArray(bm.source_health)
-    ? (bm.source_health.find(s => s.status === 'ok')?.name || '—')
-    : (bm.source_health?.name || bm.source_health?.source || '—');
+  const sh = bm.source_health || {};
+  const okSource = ['bird', 'browser_relay', 'xurl'].find(k => sh[k] === 'ok') || '—';
   setText('dc-x-sync-source', okSource);
   const totalItems = (Array.isArray(bm.x_posts) ? bm.x_posts.length : 0)
                    + (Array.isArray(bm.x_bookmarks) ? bm.x_bookmarks.length : 0);
