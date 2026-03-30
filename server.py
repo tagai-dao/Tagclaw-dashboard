@@ -52,6 +52,39 @@ def _safe(path: str) -> dict | list | None:
     return _load(RUNTIME / path)
 
 
+def _classify_social_actor(ev: dict[str, Any]) -> str:
+    """Infer which agent authored a social action history item.
+
+    Current runtime history is mixed in shared/social-history.json and older records do
+    not always carry an explicit actor field. We therefore infer ownership using the
+    strongest available signal first, then fall back conservatively:
+    - draft_ref containing runtime/bookmarker/... -> bookmarker
+    - explicit source/actor/source_agent containing bookmarker/main -> that actor
+    - otherwise default to main (historically main direct writes lacked draft_ref)
+    """
+    draft_ref = str(ev.get("draft_ref") or "").lower()
+    if "bookmarker" in draft_ref:
+        return "bookmarker"
+    if "main" in draft_ref:
+        return "main"
+
+    for key in ("source_agent", "actor", "source", "agent"):
+        val = str(ev.get(key) or "").lower()
+        if "bookmarker" in val:
+            return "bookmarker"
+        if "main" in val:
+            return "main"
+
+    return "main"
+
+
+def _split_social_actions(items: list[dict[str, Any]] | None) -> dict[str, list[dict[str, Any]]]:
+    grouped = {"main": [], "bookmarker": []}
+    for ev in (items or []):
+        grouped[_classify_social_actor(ev)].append(ev)
+    return grouped
+
+
 def _to_float(v: Any) -> float | None:
     try:
         if v is None or v == "" or str(v).lower() == "partial":
@@ -493,6 +526,7 @@ def api_status():
     bm_cands     = _safe("bookmarker/content-candidates.json")  or {}
     auto_intent  = _safe("bookmarker/autonomy-intent.json")     or {}
     social_hist  = _safe("shared/social-history.json")          or {}
+    social_split = _split_social_actions(social_hist.get("items") or [])
     social_drafts = _safe("bookmarker/social-drafts.json")      or {}
 
     # ── Trader ──
@@ -535,7 +569,7 @@ def api_status():
             "tas_history":    tas_history,
             "last_decision":  last_dec,
             "social_intent":  social_int,
-            "social_actions": list(reversed((social_hist.get("items") or [])[-20:])),
+            "social_actions": list(reversed((social_split.get("main") or [])[-20:])),
         },
         "bookmarker": {
             "topic_brief":          topic_brief,
@@ -543,7 +577,7 @@ def api_status():
             "content_candidates":   bm_cands,
             "autonomy_intent":      auto_intent,
             "social_drafts":        social_drafts,
-            "social_actions":       list(reversed((social_hist.get("items") or [])[-20:])),
+            "social_actions":       list(reversed((social_split.get("bookmarker") or [])[-20:])),
             "x_posts":              (_xp := _parse_x_tweets(hours=24, limit=20)),
             "x_posts_window":       "24h" if _xp and _xp[0].get("date") and
                                     _is_within_hours(_xp[0].get("date",""), 24) else "recent",
