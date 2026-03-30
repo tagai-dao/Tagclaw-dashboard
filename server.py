@@ -55,20 +55,22 @@ def _safe(path: str) -> dict | list | None:
 def _classify_social_actor(ev: dict[str, Any]) -> str:
     """Infer which agent authored a social action history item.
 
-    Current runtime history is mixed in shared/social-history.json and older records do
-    not always carry an explicit actor field. We therefore infer ownership using the
-    strongest available signal first, then fall back conservatively:
-    - draft_ref containing runtime/bookmarker/... -> bookmarker
-    - explicit source/actor/source_agent containing bookmarker/main -> that actor
-    - otherwise default to main (historically main direct writes lacked draft_ref)
+    Uses explicit actor field first (v2 schema), then falls back to draft_ref
+    and source/agent heuristics for legacy records.
     """
+    # v2: explicit actor field
+    actor = str(ev.get("actor") or "").lower()
+    if actor in ("main", "bookmarker"):
+        return actor
+
+    # Legacy fallback: draft_ref
     draft_ref = str(ev.get("draft_ref") or "").lower()
     if "bookmarker" in draft_ref:
         return "bookmarker"
     if "main" in draft_ref:
         return "main"
 
-    for key in ("source_agent", "actor", "source", "agent"):
+    for key in ("source_agent", "source", "agent"):
         val = str(ev.get(key) or "").lower()
         if "bookmarker" in val:
             return "bookmarker"
@@ -79,7 +81,7 @@ def _classify_social_actor(ev: dict[str, Any]) -> str:
 
 
 def _split_social_actions(items: list[dict[str, Any]] | None) -> dict[str, list[dict[str, Any]]]:
-    grouped = {"main": [], "bookmarker": []}
+    grouped: dict[str, list[dict[str, Any]]] = {"main": [], "bookmarker": []}
     for ev in (items or []):
         grouped[_classify_social_actor(ev)].append(ev)
     return grouped
