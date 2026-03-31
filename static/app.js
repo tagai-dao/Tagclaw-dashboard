@@ -701,9 +701,12 @@ function renderPipeline(elId, pipeline, agent) {
       // Legacy fallback for old schema
       detail = step.data?.social_decision || '—';
     }
+    const mainGateBadge = (agent === 'bookmarker' && step.id === 'content_candidates')
+      ? ` <span class="step-origin-badge step-origin-main" title="main agent gate: has_candidates check">main gate</span>`
+      : '';
     return `<div class="pipeline-step">
       <div class="pipeline-step-card${miAnnotation ? ' has-mi' : ''}">
-        <div class="step-label">${escHtml(step.label)}</div>
+        <div class="step-label">${escHtml(step.label)}${mainGateBadge}</div>
         <div class="step-badge ${stCls}">${escHtml(step.status || '—')}</div>
         <div class="step-detail">${detail}</div>
         ${miAnnotation}

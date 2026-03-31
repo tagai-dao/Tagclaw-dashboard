@@ -910,3 +910,23 @@ html, body {
   .pipeline-step-card { max-width: none; }
   .pipeline-arrow { transform: rotate(90deg); width: auto; padding: .15rem 0; }
 }
+
+/* ── Step Origin Badges ── */
+.step-origin-badge {
+  display: inline-block;
+  font-size: .52rem;
+  font-weight: 600;
+  padding: .05rem .3rem;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: .25rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.step-origin-main {
+  background: rgba(240, 165, 0, .15);
+  border: 1px solid rgba(240, 165, 0, .35);
+  color: var(--warn);
+}

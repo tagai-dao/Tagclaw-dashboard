@@ -81,8 +81,13 @@
     <div class="section-label" data-i18n="section-social-intent">Social Intent</div>
     <div id="main-social-intent" class="list-block">—</div>
 
-    <div class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</div>
-    <div id="main-social-pipeline" class="pipeline-container"></div>
+    <div class="x-section-header" onclick="toggleSection('main-pipeline')">
+      <span class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</span>
+      <button id="main-pipeline-toggle" class="x-toggle-btn">▼</button>
+    </div>
+    <div id="main-pipeline-collapsible" class="x-collapsible">
+      <div id="main-social-pipeline" class="pipeline-container"></div>
+    </div>
 
     <div class="section-label" data-i18n="section-social-actions">Social Actions</div>
     <div id="main-actions-wrapper" class="actions-scroll-wrapper">
@@ -122,8 +127,13 @@
       <div id="bm-drafts-list" class="list-block">—</div>
     </div>
 
-    <div class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</div>
-    <div id="bm-social-pipeline" class="pipeline-container"></div>
+    <div class="x-section-header" onclick="toggleSection('bm-pipeline')">
+      <span class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</span>
+      <button id="bm-pipeline-toggle" class="x-toggle-btn">▲</button>
+    </div>
+    <div id="bm-pipeline-collapsible" class="x-collapsible open">
+      <div id="bm-social-pipeline" class="pipeline-container"></div>
+    </div>
 
     <div class="section-label" data-i18n="section-social-actions">Social Actions</div>
     <div id="bm-actions-wrapper" class="actions-scroll-wrapper">
