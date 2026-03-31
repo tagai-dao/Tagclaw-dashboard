@@ -81,7 +81,7 @@ def _classify_social_actor(ev: dict[str, Any]) -> str:
 
 
 def _split_social_actions(items: list[dict[str, Any]] | None) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {"main": [], "bookmarker": []}
+    grouped = {"main": [], "bookmarker": []}
     for ev in (items or []):
         grouped[_classify_social_actor(ev)].append(ev)
     return grouped

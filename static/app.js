@@ -609,7 +609,9 @@ function renderBookmarker(bm) {
     kwEl.innerHTML = kws.slice(0, 8).map(k => `<span class="tag">${escHtml(k)}</span>`).join('');
   }
 
-  const candidateList = cands.candidates || brief.candidates || [];
+  const rawCandidates = cands.candidates || cands.items || brief.candidates || [];
+  // Filter out empty/non-actionable items (e.g. {count:0, publish_ready:false})
+  const candidateList = rawCandidates.filter(c => c.publish_ready !== false || c.title || c.headline || c.url);
   const count = candidateList.length;
   setText('bm-cands-count', count ? `${count} ${t('candidates-unit')}` : t('no-candidates'));
   const candsEl = $('bm-cands-list');
@@ -732,7 +734,7 @@ function renderTrader(trader) {
   const risk    = trader.risk_status       || {};
   const onchain = trader.onchain_positions || {};
 
-  setText('trader-tas', fmt(tasT.score ?? tasT.tas_trade));
+  setText('trader-tas', fmt(tasT.value ?? tasT.score ?? tasT.tas_trade));
   const trMode = tasT.autonomy_mode || '—';
   setBadge('trader-mode-badge', trMode, trMode.toLowerCase().replace(/[^a-z-]/g,''));
 
@@ -974,8 +976,8 @@ async function renderDataCollection(data) {
     dcPill('dc-community-status', cs.status || 'ok');
     setText('dc-community-score',   fmt(cs.community_score));
     setText('dc-community-scanned', cs.scanned_at ? shortTs(cs.scanned_at) : '—');
-    setText('dc-community-posts',   cs.posts_scanned ?? cs.post_count ?? '—');
-    setText('dc-community-source',  cs.source || cs.community || '—');
+    setText('dc-community-posts',   cs.posts_scanned ?? cs.post_count ?? cs.feed_size ?? '—');
+    setText('dc-community-source',  cs.source || cs.community || 'TagClaw Feed');
   } catch (_) {
     dcPill('dc-community-status', '—');
   }
