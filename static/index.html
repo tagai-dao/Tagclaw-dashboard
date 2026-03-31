@@ -215,9 +215,9 @@
 
     <div class="x-section-header" onclick="toggleSection('bm-pipeline')">
       <span class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</span>
-      <button id="bm-pipeline-toggle" class="x-toggle-btn">▲</button>
+      <button id="bm-pipeline-toggle" class="x-toggle-btn">▼</button>
     </div>
-    <div id="bm-pipeline-collapsible" class="x-collapsible open">
+    <div id="bm-pipeline-collapsible" class="x-collapsible">
       <div id="bm-social-pipeline" class="pipeline-container"></div>
     </div>
 
@@ -277,8 +277,13 @@
     <div class="section-label" data-i18n="section-result-summary">Result Summary</div>
     <div id="dev-result-summary" class="text-block muted">—</div>
 
-    <div class="section-label" data-i18n="section-files-changed">Files Changed</div>
-    <div id="dev-files-changed" class="list-block">—</div>
+    <div class="x-section-header" onclick="toggleSection('dev-files-changed')">
+      <span class="section-label" data-i18n="section-files-changed">Files Changed</span>
+      <button id="dev-files-changed-toggle" class="x-toggle-btn">▼</button>
+    </div>
+    <div id="dev-files-changed-collapsible" class="x-collapsible">
+      <div id="dev-files-changed" class="list-block">—</div>
+    </div>
 
     <div class="section-label" data-i18n="section-result-links">Result Links</div>
     <div id="dev-result-links" class="list-block">—</div>
