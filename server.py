@@ -501,6 +501,7 @@ def _load_trade_actions(limit: int = 20) -> list[dict]:
 
 def _build_bookmarker_social_pipeline(
     auto_intent: dict, drafts: dict, execution: dict, write_state: dict,
+    *, main_social_intent: dict | None = None, main_last_decision: dict | None = None,
 ) -> dict:
     """Build bookmarker social execution pipeline summary for dashboard."""
     # Step 1: Autonomy Intent
@@ -526,6 +527,25 @@ def _build_bookmarker_social_pipeline(
     breaker_state = breaker.get("state", "—")
     breaker_consecutive = breaker.get("consecutive_1010_failures", 0)
     breaker_until = breaker.get("until")
+
+    # Main Agent influence on bookmarker pipeline
+    _msi = main_social_intent or {}
+    _mld = main_last_decision or {}
+    _m_payload = _msi.get("payload") or {}
+    _m_meta = _msi.get("meta") or {}
+    _m_guidance = auto_intent.get("main_guidance") or {}
+
+    main_influence = {
+        "social_decision": _mld.get("social_decision", "—"),
+        "authorized": _m_payload.get("authorized", False),
+        "intent_status": _msi.get("status", "—"),
+        "guidance": {
+            "experiment_mode": _m_guidance.get("experiment_mode", ""),
+            "signal_priority": _m_guidance.get("signal_priority", ""),
+            "action_emphasis": _m_guidance.get("action_emphasis", ""),
+        },
+        "shared_executor": True,
+    }
 
     return {
         "steps": [
@@ -565,6 +585,7 @@ def _build_bookmarker_social_pipeline(
                 },
             },
         ],
+        "main_influence": main_influence,
     }
 
 
@@ -703,7 +724,10 @@ def api_status():
             "autonomy_intent":      auto_intent,
             "social_drafts":        social_drafts,
             "social_actions":       list(reversed((social_split.get("bookmarker") or [])[-20:])),
-            "social_pipeline":      _build_bookmarker_social_pipeline(auto_intent, social_drafts, bm_exec, write_state),
+            "social_pipeline":      _build_bookmarker_social_pipeline(
+                auto_intent, social_drafts, bm_exec, write_state,
+                main_social_intent=social_int, main_last_decision=last_dec,
+            ),
             "x_posts":              (_xp := _parse_x_tweets(hours=24, limit=20)),
             "x_posts_window":       "24h" if _xp and _xp[0].get("date") and
                                     _is_within_hours(_xp[0].get("date",""), 24) else "recent",

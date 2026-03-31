@@ -821,8 +821,64 @@ html, body {
   font-size: .85rem;
   line-height: 1;
 }
+/* Pipeline steps row — wraps the horizontal step cards */
+.pipeline-steps-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+/* Main influence context banner above bookmarker pipeline */
+.pipeline-main-influence {
+  margin-bottom: .4rem;
+  padding: .3rem .55rem;
+  background: rgba(0, 210, 106, .06);
+  border: 1px dashed rgba(0, 210, 106, .25);
+  border-radius: 6px;
+}
+.pipeline-main-influence .mi-header {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  flex-wrap: wrap;
+}
+.pipeline-main-influence .mi-label {
+  font-size: .62rem;
+  font-weight: 600;
+  color: var(--ok);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.pipeline-main-influence .mi-badge {
+  font-size: .58rem;
+  font-family: var(--mono);
+  padding: .05rem .3rem;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid rgba(255, 255, 255, .1);
+}
+
+/* Main influence annotation on individual step cards */
+.mi-annotation {
+  margin-top: .3rem;
+  padding-top: .25rem;
+  border-top: 1px dashed rgba(0, 210, 106, .2);
+  font-size: .55rem;
+  color: var(--ok);
+  line-height: 1.35;
+}
+.mi-annotation .mi-arrow-in {
+  font-size: .7rem;
+  opacity: .7;
+  margin-right: .1rem;
+}
+.pipeline-step-card.has-mi {
+  border-color: rgba(0, 210, 106, .2);
+}
+
 @media (max-width: 640px) {
   .pipeline-container { flex-direction: column; align-items: stretch; }
+  .pipeline-steps-row { flex-direction: column; align-items: stretch; }
   .pipeline-step { flex-direction: column; }
   .pipeline-step-card { max-width: none; }
   .pipeline-arrow { transform: rotate(90deg); width: auto; padding: .15rem 0; }
