@@ -45,6 +45,101 @@
 <!-- ═══════════════════════════════════════════ MAIN GRID ══ -->
 <main class="grid">
 
+  <!-- ── TAS Components Panel (top, full width) ── -->
+  <section class="card" id="tas-panel">
+    <h2 class="card-title" data-i18n="panel-tas">TAS Components</h2>
+    <div class="tas-panel-body">
+
+      <!-- Part 1 + 2: Left column = Current Values + TAS_total chart stacked -->
+      <div class="tas-panel-left">
+
+        <!-- Part 1: Current Values -->
+        <div>
+          <div class="section-label" data-i18n="section-tas-values">Current Values</div>
+          <div class="tas-total-display">
+            <span class="muted small" data-i18n="label-tas-total">TAS Total</span>
+            <span id="tas-total-big" class="tas-total-big clr-ok">—</span>
+          </div>
+          <div class="row compact" style="margin-top:.5rem">
+            <div class="kv"><span class="k">TAS_social</span><span class="v mono" id="tas-panel-social">—</span></div>
+            <div class="kv"><span class="k">TAS_trade</span><span class="v mono" id="tas-panel-trade">—</span></div>
+            <div class="kv"><span class="k">TAS_total</span><span class="v mono bold" id="tas-panel-total">—</span></div>
+          </div>
+          <div class="muted small" id="tas-updated-at"></div>
+        </div>
+
+        <!-- TAS_total sparkline (below Current Values) -->
+        <div class="tas-mini-wrap">
+          <div id="tas-history-total" class="tas-mini-single"></div>
+        </div>
+
+      </div>
+
+      <!-- Part 2: Right column = TAS_social (top) + TAS_trade (bottom) sparklines -->
+      <div class="tas-panel-right">
+        <div class="section-label" data-i18n="recent-cycles">Recent Cycles</div>
+        <div id="tas-history-social" class="tas-mini-single"></div>
+        <div id="tas-history-trade" class="tas-mini-single" style="margin-top:.6rem"></div>
+      </div>
+
+      <!-- Part 3: Calculation Logic Visualization -->
+      <div class="tas-panel-col tas-calc-col">
+        <div class="section-label" data-i18n="section-tas-calc">Calculation Logic</div>
+        <div class="tas-calc-chain">
+
+          <!-- TAS_SOCIAL (collapsible, default collapsed) -->
+          <div class="tas-component">
+            <div class="tas-comp-header x-section-header" onclick="toggleSection('tas-calc-social-detail')">
+              <span class="badge sm" style="color:#58a6ff;border-color:rgba(88,166,255,.3);background:rgba(88,166,255,.08)">TAS_social</span>
+              <span id="tas-calc-social" class="mono small muted">—</span>
+              <button id="tas-calc-social-detail-toggle" class="x-toggle-btn" style="margin-left:auto">▼</button>
+            </div>
+            <div id="tas-calc-social-detail-collapsible" class="x-collapsible">
+              <div class="tas-formula">
+                <div class="tas-formula-line"><span data-i18n="tas-formula-align-src">0xNought 互动</span> <span class="muted">(likes×1 + comments×5 + retweets×3)</span></div>
+                <div class="tas-formula-line">↓ align_score = <span id="tas-align-score" class="mono clr-ok">—</span></div>
+                <div class="tas-formula-line"><span data-i18n="tas-formula-community-src">社区互动</span> <span class="muted">feed engagement</span></div>
+                <div class="tas-formula-line">↓ community_score = <span id="tas-community-score" class="mono clr-ok">—</span></div>
+                <div class="tas-formula-result">TAS_social = <span class="mono muted">0.7</span> × align + <span class="mono muted">0.3</span> × community <span class="muted small" data-i18n="tas-window-label">(24h window)</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAS_TRADE (collapsible, default collapsed) -->
+          <div class="tas-component">
+            <div class="tas-comp-header x-section-header" onclick="toggleSection('tas-calc-trade-detail')">
+              <span class="badge sm" style="color:#f0a500;border-color:rgba(240,165,0,.3);background:rgba(240,165,0,.08)">TAS_trade</span>
+              <span id="tas-calc-trade" class="mono small muted">—</span>
+              <button id="tas-calc-trade-detail-toggle" class="x-toggle-btn" style="margin-left:auto">▼</button>
+            </div>
+            <div id="tas-calc-trade-detail-collapsible" class="x-collapsible">
+              <div class="tas-formula">
+                <div class="tas-formula-line">base_value = <span id="tas-base-value" class="mono">—</span></div>
+                <div class="tas-formula-line">claim_history_score = <span id="tas-claim-history" class="mono">—</span></div>
+                <div class="tas-formula-line">holding_trend = <span id="tas-holding-trend" class="mono">—</span></div>
+                <div class="tas-formula-result">TAS_trade = min(1.0, base×0.6 + claim×0.2 + holding×0.2) <span class="muted small" data-i18n="tas-window-label">(24h window)</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAS_TOTAL -->
+          <div class="tas-component">
+            <div class="tas-comp-header">
+              <span class="badge sm" style="color:#00d26a;border-color:rgba(0,210,106,.3);background:rgba(0,210,106,.08)">TAS_total</span>
+              <span id="tas-calc-total" class="mono small muted">—</span>
+            </div>
+            <div class="tas-formula">
+              <div class="tas-formula-result">TAS = <span class="mono muted">0.7</span> × TAS_social + <span class="mono muted">0.3</span> × TAS_trade</div>
+              <div class="tas-formula-result">= 0.7 × <span id="tas-formula-social" class="mono">—</span> + 0.3 × <span id="tas-formula-trade" class="mono">—</span> = <span id="tas-formula-total" class="mono clr-ok bold">—</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </section>
+
   <!-- ── Main Agent ── -->
   <section class="card" id="main-panel">
     <h2 class="card-title" data-i18n="panel-main">Main Agent</h2>
@@ -66,23 +161,19 @@
       </div>
     </div>
 
-    <div class="section-label" data-i18n="section-tas">TAS Components</div>
-    <div class="row compact">
-      <div class="kv"><span class="k">TAS_social</span><span class="v mono" id="main-tas-social">—</span></div>
-      <div class="kv"><span class="k">TAS_trade</span><span class="v mono" id="main-tas-trade">—</span></div>
-      <div class="kv"><span class="k">TAS_total</span><span class="v mono bold" id="main-tas-total">—</span></div>
-    </div>
-    <div class="tas-history-head muted small" data-i18n="recent-cycles">Recent cycles</div>
-    <div id="main-tas-history" class="tas-history-grid"></div>
-
     <div class="section-label" data-i18n="section-last-decision">Last Decision</div>
     <div id="main-decision" class="text-block muted">—</div>
 
     <div class="section-label" data-i18n="section-social-intent">Social Intent</div>
     <div id="main-social-intent" class="list-block">—</div>
 
-    <div class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</div>
-    <div id="main-social-pipeline" class="pipeline-container"></div>
+    <div class="x-section-header" onclick="toggleSection('main-pipeline')">
+      <span class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</span>
+      <button id="main-pipeline-toggle" class="x-toggle-btn">▼</button>
+    </div>
+    <div id="main-pipeline-collapsible" class="x-collapsible">
+      <div id="main-social-pipeline" class="pipeline-container"></div>
+    </div>
 
     <div class="section-label" data-i18n="section-social-actions">Social Actions</div>
     <div id="main-actions-wrapper" class="actions-scroll-wrapper">
@@ -122,8 +213,13 @@
       <div id="bm-drafts-list" class="list-block">—</div>
     </div>
 
-    <div class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</div>
-    <div id="bm-social-pipeline" class="pipeline-container"></div>
+    <div class="x-section-header" onclick="toggleSection('bm-pipeline')">
+      <span class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</span>
+      <button id="bm-pipeline-toggle" class="x-toggle-btn">▼</button>
+    </div>
+    <div id="bm-pipeline-collapsible" class="x-collapsible">
+      <div id="bm-social-pipeline" class="pipeline-container"></div>
+    </div>
 
     <div class="section-label" data-i18n="section-social-actions">Social Actions</div>
     <div id="bm-actions-wrapper" class="actions-scroll-wrapper">
@@ -181,8 +277,13 @@
     <div class="section-label" data-i18n="section-result-summary">Result Summary</div>
     <div id="dev-result-summary" class="text-block muted">—</div>
 
-    <div class="section-label" data-i18n="section-files-changed">Files Changed</div>
-    <div id="dev-files-changed" class="list-block">—</div>
+    <div class="x-section-header" onclick="toggleSection('dev-files-changed')">
+      <span class="section-label" data-i18n="section-files-changed">Files Changed</span>
+      <button id="dev-files-changed-toggle" class="x-toggle-btn">▼</button>
+    </div>
+    <div id="dev-files-changed-collapsible" class="x-collapsible">
+      <div id="dev-files-changed" class="list-block">—</div>
+    </div>
 
     <div class="section-label" data-i18n="section-result-links">Result Links</div>
     <div id="dev-result-links" class="list-block">—</div>

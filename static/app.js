@@ -12,6 +12,13 @@ const I18N = {
     'label-op': 'OP',
     'label-vp': 'VP',
     'label-mode': '模式',
+    'panel-tas': 'TAS 指标',
+    'section-tas-values': '当前数值',
+    'section-tas-calc': '计算逻辑',
+    'label-tas-total': 'TAS 总分',
+    'tas-formula-align-src': '0xNought 互动',
+    'tas-formula-community-src': '社区互动',
+    'tas-window-label': '(24h 滚动窗口)',
     'section-tas': 'TAS 组件',
     'recent-cycles': '最近周期',
     'section-last-decision': '最新决策',
@@ -154,6 +161,13 @@ const I18N = {
     'label-op': 'OP',
     'label-vp': 'VP',
     'label-mode': 'Mode',
+    'panel-tas': 'TAS Components',
+    'section-tas-values': 'Current Values',
+    'section-tas-calc': 'Calculation Logic',
+    'label-tas-total': 'TAS Total',
+    'tas-formula-align-src': '0xNought Interactions',
+    'tas-formula-community-src': 'Community Engagement',
+    'tas-window-label': '(24h rolling window)',
     'section-tas': 'TAS Components',
     'recent-cycles': 'Recent cycles',
     'section-last-decision': 'Last Decision',
@@ -440,6 +454,7 @@ function renderStatus(data) {
     totalEl.className = 'value ' + (tasTotal >= 1.5 ? 'clr-ok' : tasTotal >= 0.8 ? 'clr-warn' : 'clr-error');
   }
 
+  renderTas(data);
   renderMain(data.main || {});
   renderBookmarker(data.bookmarker || {});
   renderTrader(data.trader || {});
@@ -454,53 +469,116 @@ function numericOrNull(v) {
 }
 
 function sparklineSvg(values, color) {
-  const width = 220;
-  const height = 70;
-  const padX = 10;
-  const padY = 10;
+  const width  = 230;
+  const height = 75;
+  const padX   = 8;
+  const padY   = 8;
+  const botPad = 16;  // extra bottom for axis label
+
+  const chartH = height - padY - botPad;
+
   const valid = values.map((v, i) => ({ v: numericOrNull(v), i })).filter(p => p.v !== null);
   if (!valid.length) {
-    return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="10">${t('no-tas-history')}</text></svg>`;
+    return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="9">${t('no-tas-history')}</text></svg>`;
   }
-  const min = Math.min(...valid.map(p => p.v));
-  const max = Math.max(...valid.map(p => p.v));
-  const span = Math.max(max - min, 0.0001);
-  const count = Math.max(values.length - 1, 1);
-  const toX = i => padX + (i / count) * (width - padX * 2);
-  const toY = v => height - padY - ((v - min) / span) * (height - padY * 2);
-  const pts = valid.map(p => `${toX(p.i)},${toY(p.v)}`);
-  const dots = valid.map(p => `<circle cx="${toX(p.i)}" cy="${toY(p.v)}" r="2.3" fill="${color}" />`).join('');
-  return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><line x1="${padX}" y1="${height-padY}" x2="${width-padX}" y2="${height-padY}" stroke="rgba(255,255,255,0.08)" stroke-width="1" /><polyline fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />${dots}</svg>`;
+
+  const rawMin = Math.min(...valid.map(p => p.v));
+  const rawMax = Math.max(...valid.map(p => p.v));
+  // Pad Y range by 15% so line doesn't hug edges
+  const span   = Math.max(rawMax - rawMin, 0.01);
+  const yMin   = Math.max(0, rawMin - span * 0.15);
+  const yMax   = rawMax + span * 0.15;
+  const ySpan  = Math.max(yMax - yMin, 0.001);
+
+  const count  = Math.max(values.length - 1, 1);
+  const toX    = i => padX + (i / count) * (width - padX * 2);
+  const toY    = v => padY + chartH - ((v - yMin) / ySpan) * chartH;
+  const baseY  = padY + chartH;
+
+  // Area fill polygon: line points + baseline corners
+  const linePts  = valid.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
+  const areaPath = `${linePts.join(' ')} ${toX(valid[valid.length - 1].i).toFixed(1)},${baseY.toFixed(1)} ${toX(valid[0].i).toFixed(1)},${baseY.toFixed(1)}`;
+
+  // Extract RGB from hex color for rgba fill
+  const hexToRgb = h => { const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h); return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '255,255,255'; };
+  const rgb = hexToRgb(color);
+
+  const dots = valid.map(p =>
+    `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2.5" fill="${color}" opacity="0.9"/>`
+  ).join('');
+
+  // Y-axis value labels: min and max
+  const yMinLbl = rawMin % 1 === 0 ? rawMin.toFixed(0) : rawMin.toFixed(2);
+  const yMaxLbl = rawMax % 1 === 0 ? rawMax.toFixed(0) : rawMax.toFixed(2);
+
+  return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline">
+    <defs>
+      <linearGradient id="grad-${rgb.replace(/,/g,'-')}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0.03"/>
+      </linearGradient>
+    </defs>
+    <line x1="${padX}" y1="${baseY.toFixed(1)}" x2="${(width-padX).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+    <polygon points="${areaPath}" fill="url(#grad-${rgb.replace(/,/g,'-')})" />
+    <polyline fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${linePts.join(' ')}"/>
+    ${dots}
+    <text x="${padX}" y="${(baseY + 11).toFixed(1)}" font-size="7.5" fill="rgba(255,255,255,0.3)">${yMinLbl}</text>
+    <text x="${(width - padX).toFixed(1)}" y="${(baseY + 11).toFixed(1)}" text-anchor="end" font-size="7.5" fill="rgba(255,255,255,0.3)">${yMaxLbl}</text>
+  </svg>`;
 }
 
-function renderTasHistory(history, tas) {
-  const el = $('main-tas-history');
+function _renderTasMiniCard(elId, label, color, values, latest, firstTs, lastTs) {
+  const el = $(elId);
   if (!el) return;
-  const points = Array.isArray(history) ? history : [];
-  if (!points.length) {
+  if (!values.length) {
     el.innerHTML = `<div class="muted small">${t('no-tas-history')}</div>`;
     return;
   }
+  el.innerHTML = `
+    <div class="tas-mini-card">
+      <div class="tas-mini-head">
+        <span class="tas-mini-label">${escHtml(label)}</span>
+        <span class="tas-mini-value" style="color:${color}">${latest !== null && latest !== undefined ? escHtml(fmt(latest)) : '—'}</span>
+      </div>
+      ${sparklineSvg(values, color)}
+      <div class="tas-mini-axis"><span>${escHtml(firstTs)}</span><span>${escHtml(lastTs)}</span></div>
+    </div>`;
+}
+
+function renderTasHistory(history, tas) {
+  const allPoints = Array.isArray(history) ? history : [];
+
+  // Filter to last 3 days (72h) for better readability of recent trends
+  const cutoffMs = Date.now() - 72 * 60 * 60 * 1000;
+  let points = allPoints.filter(p => {
+    if (!p.ts) return false;
+    try { return new Date(p.ts).getTime() >= cutoffMs; } catch { return false; }
+  });
+  // Fallback: if < 3 points in 72h, show last 8 points from full history
+  if (points.length < 3) points = allPoints.slice(-8);
+
   const metrics = [
-    { key: 'tas_social', label: 'TAS_social', color: '#58a6ff' },
-    { key: 'tas_trade',  label: 'TAS_trade',  color: '#f0a500' },
-    { key: 'tas_total',  label: 'TAS_total',  color: '#00d26a' },
+    { key: 'tas_social', elId: 'tas-history-social', label: 'TAS_social', color: '#58a6ff' },
+    { key: 'tas_trade',  elId: 'tas-history-trade',  label: 'TAS_trade',  color: '#f0a500' },
+    { key: 'tas_total',  elId: 'tas-history-total',  label: 'TAS_total',  color: '#00d26a' },
   ];
-  el.innerHTML = metrics.map(m => {
+
+  if (!points.length) {
+    metrics.forEach(m => {
+      const el = $(m.elId);
+      if (el) el.innerHTML = `<div class="muted small">${t('no-tas-history')}</div>`;
+    });
+    return;
+  }
+
+  const firstTs = points[0]?.ts ? shortTs(points[0].ts) : '—';
+  const lastTs  = points[points.length - 1]?.ts ? shortTs(points[points.length - 1].ts) : '—';
+
+  metrics.forEach(m => {
     const values = points.map(p => p[m.key]);
     const latest = numericOrNull(tas[m.key]) ?? [...values].reverse().map(numericOrNull).find(v => v !== null);
-    const firstTs = points[0]?.ts ? shortTs(points[0].ts) : '—';
-    const lastTs = points[points.length - 1]?.ts ? shortTs(points[points.length - 1].ts) : '—';
-    return `
-      <div class="tas-mini-card">
-        <div class="tas-mini-head">
-          <span class="tas-mini-label">${escHtml(m.label)}</span>
-          <span class="tas-mini-value" style="color:${m.color}">${latest !== undefined && latest !== null ? escHtml(fmt(latest)) : '—'}</span>
-        </div>
-        ${sparklineSvg(values, m.color)}
-        <div class="tas-mini-axis"><span>${escHtml(firstTs)}</span><span>${escHtml(lastTs)}</span></div>
-      </div>`;
-  }).join('');
+    _renderTasMiniCard(m.elId, m.label, m.color, values, latest, firstTs, lastTs);
+  });
 }
 
 function renderSocialActionsList(elId, actions) {
@@ -527,6 +605,81 @@ function renderSocialActionsList(elId, actions) {
   }).join('');
 }
 
+// ── TAS Panel ──
+function renderTas(data) {
+  const tas     = (data.main   || {}).tas_latest  || {};
+  const history = (data.main   || {}).tas_history || [];
+  const tradeD  = (data.trader || {}).tas_trade   || {};
+
+  const social = numericOrNull(tas.tas_social);
+  const trade  = numericOrNull(tas.tas_trade);
+  const total  = numericOrNull(tas.tas_total);
+
+  // Part 1 — current values
+  setText('tas-panel-social', fmt(social));
+  setText('tas-panel-trade',  fmt(trade));
+  setText('tas-panel-total',  fmt(total));
+
+  const updEl = $('tas-updated-at');
+  if (updEl) updEl.textContent = tas.updated_at ? shortTs(tas.updated_at) : '';
+
+  const bigEl = $('tas-total-big');
+  if (bigEl) {
+    bigEl.textContent = total !== null ? fmt(total) : '—';
+    bigEl.className = 'tas-total-big ' + (total === null ? 'clr-error' : total >= 1.5 ? 'clr-ok' : total >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+
+  // Part 2 — history chart
+  renderTasHistory(history, tas);
+
+  // Part 3 — calculation logic
+  // TAS_SOCIAL
+  const calcSocialEl = $('tas-calc-social');
+  if (calcSocialEl) {
+    calcSocialEl.textContent = social !== null ? fmt(social) : '—';
+    calcSocialEl.className = 'mono small ' + (social === null ? 'muted' : social >= 1.5 ? 'clr-ok' : social >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+  const alignScore     = numericOrNull(tas.align_score);
+  const communityScore = numericOrNull(tas.community_score);
+  const alignEl = $('tas-align-score');
+  if (alignEl) {
+    alignEl.textContent = alignScore !== null ? fmt(alignScore) : '—';
+    alignEl.className = alignScore !== null ? 'mono clr-ok' : 'mono muted';
+  }
+  const commEl = $('tas-community-score');
+  if (commEl) {
+    commEl.textContent = communityScore !== null ? fmt(communityScore) : '—';
+    commEl.className = communityScore !== null ? 'mono clr-ok' : 'mono muted';
+  }
+
+  // TAS_TRADE
+  const calcTradeEl = $('tas-calc-trade');
+  if (calcTradeEl) {
+    calcTradeEl.textContent = trade !== null ? fmt(trade) : '—';
+    calcTradeEl.className = 'mono small ' + (trade === null ? 'muted' : trade >= 1.5 ? 'clr-ok' : trade >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+  const baseVal      = numericOrNull(tradeD.base_value);
+  const claimHist    = numericOrNull(tradeD.claim_history_score);
+  const holdingScore = numericOrNull(tradeD.holding_trend_score) ?? numericOrNull(tradeD.holding_trend);
+  setText('tas-base-value',    baseVal   !== null ? fmt(baseVal)   : '—');
+  setText('tas-claim-history', claimHist !== null ? fmt(claimHist) : '—');
+  setText('tas-holding-trend', holdingScore !== null ? fmt(holdingScore) : '—');
+
+  // TAS_TOTAL formula
+  const calcTotalEl = $('tas-calc-total');
+  if (calcTotalEl) {
+    calcTotalEl.textContent = total !== null ? fmt(total) : '—';
+    calcTotalEl.className = 'mono small ' + (total === null ? 'muted' : total >= 1.5 ? 'clr-ok' : total >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+  setText('tas-formula-social', social !== null ? fmt(social) : '—');
+  setText('tas-formula-trade',  trade  !== null ? fmt(trade)  : '—');
+  const formulaTotalEl = $('tas-formula-total');
+  if (formulaTotalEl) {
+    formulaTotalEl.textContent = total !== null ? fmt(total) : '—';
+    formulaTotalEl.className = 'mono bold ' + (total === null ? 'muted' : total >= 1.5 ? 'clr-ok' : total >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+}
+
 // ── Main Panel ──
 function renderMain(main) {
   const ip  = main.input_packet   || {};
@@ -545,11 +698,6 @@ function renderMain(main) {
 
   const mode = sum.mode || dec.mode || '—';
   setBadge('main-mode-badge', mode, mode.toLowerCase().replace(/[^a-z-]/g, ''));
-
-  setText('main-tas-social', fmt(tas.tas_social));
-  setText('main-tas-trade',  fmt(tas.tas_trade));
-  setText('main-tas-total',  fmt(tas.tas_total));
-  renderTasHistory(main.tas_history || [], tas);
 
   const decText = [
     dec.social_decision ? `${t('decision-social')}: ${dec.social_decision}` : null,
@@ -610,18 +758,59 @@ function renderPipeline(elId, pipeline, agent) {
 
     if (agent === 'main' && step.id === 'gate_checks') {
       const checks = step.data || {};
-      detail = Object.entries(checks).map(([k, v]) =>
-        `<div class="gate-item"><span class="${v ? 'gate-pass' : 'gate-fail'}">${v ? '✓' : '✗'}</span> ${escHtml(k)}</div>`
-      ).join('');
+      detail = Object.entries(checks)
+        .filter(([k]) => !k.startsWith('_'))
+        .map(([k, v]) =>
+          `<div class="gate-item"><span class="${v ? 'gate-pass' : 'gate-fail'}">${v ? '✓' : '✗'}</span> ${escHtml(k)}</div>`
+        ).join('');
+      const passCount = checks._pass_count ?? Object.values(checks).filter(Boolean).length;
+      const total = checks._total ?? Object.keys(checks).filter(k => !k.startsWith('_')).length;
+      if (total) detail = `<div class="gate-summary">${passCount}/${total} pass</div>` + detail;
     } else if (agent === 'main' && step.id === 'social_intent') {
       const d = step.data || {};
       detail = `authorized: ${d.authorized ? '✓' : '✗'}`;
       if (d.action_count) detail += ` · ${d.action_count} actions`;
       if (d.reason) detail += `<br>${escHtml(d.reason.slice(0, 80))}`;
-    } else if (agent === 'bookmarker' && step.id === 'autonomy') {
+    } else if (agent === 'main' && step.id === 'cli_wrapper') {
+      const d = step.data || {};
+      detail = `<span class="mono-sm">${escHtml(d.script || 'main_social_action.py')}</span>`;
+      detail += `<br>actor: ${escHtml(d.actor || 'main')} → ${escHtml(d.records_to || 'social-history.json')}`;
+    } else if (agent === 'main' && step.id === 'decision_history') {
+      const d = step.data || {};
+      detail = escHtml(d.social_decision || '—');
+      if (d.main_action_count) detail += ` · ${d.main_action_count} actions`;
+      if (d.reason) detail += `<br><span class="muted">${escHtml(d.reason.slice(0, 80))}</span>`;
+    } else if (agent === 'bookmarker' && step.id === 'x_sync') {
+      const d = step.data || {};
+      detail = `source: ${escHtml(d.source || d.source_class || '—')}`;
+      if (d.updated_at) detail += `<br>${shortTs(d.updated_at)}`;
+    } else if (agent === 'bookmarker' && step.id === 'topic_brief') {
+      const d = step.data || {};
+      const kws = (d.keywords || []).slice(0, 4);
+      detail = kws.length ? kws.map(k => `<span class="tag-xs">${escHtml(k)}</span>`).join(' ') : '—';
+      if (d.urgency) detail += `<br>urgency: ${escHtml(d.urgency)}`;
+    } else if (agent === 'bookmarker' && step.id === 'content_candidates') {
+      const d = step.data || {};
+      detail = `${d.count || 0} candidates`;
+      const types = d.types || {};
+      if (Object.keys(types).length) detail += '<br>' + Object.entries(types).map(([k,v]) => `${escHtml(String(k))}×${v}`).join(' ');
+    } else if (agent === 'bookmarker' && step.id === 'social_drafts') {
+      const d = step.data || {};
+      detail = `${d.count || 0} drafts`;
+      const types = d.types || {};
+      if (Object.keys(types).length) detail += ': ' + Object.entries(types).map(([k,v]) => `${escHtml(String(k))}×${v}`).join(' ');
+      if (d.x_items_seen) detail += `<br>seen: ${d.x_items_seen}`;
+    } else if (agent === 'bookmarker' && step.id === 'autonomy_intent') {
       const d = step.data || {};
       detail = `mode: ${escHtml(d.mode || '—')}`;
-      if (d.recommended_actions?.length) detail += `<br>→ ${d.recommended_actions.join(', ')}`;
+      if (d.recommended_actions?.length) detail += `<br>→ ${escHtml(d.recommended_actions.join(', '))}`;
+      // Show TAS/OP context
+      if (d.tas_social != null || d.op != null) {
+        const thr = d.thresholds || {};
+        const tasVal = (typeof d.tas_social === 'number') ? d.tas_social.toFixed(2) : '—';
+        const opVal = (typeof d.op === 'number') ? Math.round(d.op) : '—';
+        detail += `<br><span class="threshold-row">TAS=${tasVal} OP=${opVal}</span>`;
+      }
       // Main guidance annotation
       if (mi) {
         const g = mi.guidance || {};
@@ -632,34 +821,40 @@ function renderPipeline(elId, pipeline, agent) {
           miAnnotation = `<div class="mi-annotation"><span class="mi-arrow-in">⤹</span> main_guidance</div>`;
         }
       }
-    } else if (agent === 'bookmarker' && step.id === 'drafts') {
-      const d = step.data || {};
-      detail = `${d.count || 0} drafts`;
-      const types = d.types || {};
-      if (Object.keys(types).length) detail += ': ' + Object.entries(types).map(([k,v]) => `${k}×${v}`).join(' ');
     } else if (agent === 'bookmarker' && step.id === 'execution') {
       const d = step.data || {};
       const parts = [];
       if (d.attempted) parts.push(`${d.succeeded}/${d.attempted} ok`);
       if (d.failed) parts.push(`${d.failed} fail`);
-      if (d.noop) parts.push(`${d.noop} noop`);
+      if (d.noop != null) parts.push(`${d.noop} noop`);
       detail = parts.join(' · ') || '—';
+      // Breaker status inline
+      const brkState = d.breaker_state || '—';
+      const brkCls = brkState === 'open' ? 'clr-error' : 'clr-ok';
+      detail += `<br>breaker: <span class="${brkCls}">${escHtml(brkState)}</span>`;
+      if (d.breaker_consecutive) detail += ` (${d.breaker_consecutive}×)`;
+      if (d.filtered_types?.length) detail += `<br>filtered: ${escHtml(d.filtered_types.join(', '))}`;
       if (d.executed_at) detail += `<br>${shortTs(d.executed_at)}`;
       // Shared executor annotation
       if (mi) {
         miAnnotation = `<div class="mi-annotation"><span class="mi-arrow-in">⤹</span> ${t('shared-executor')}</div>`;
       }
     } else if (step.id === 'breaker') {
+      // Legacy fallback for old schema
       const d = step.data || {};
       detail = d.state || '—';
       if (d.consecutive_failures) detail += ` · ${d.consecutive_failures} consecutive`;
       if (d.until) detail += `<br>until ${shortTs(d.until)}`;
     } else if (step.id === 'decision') {
+      // Legacy fallback for old schema
       detail = step.data?.social_decision || '—';
     }
+    const mainGateBadge = (agent === 'bookmarker' && step.id === 'content_candidates')
+      ? ` <span class="step-origin-badge step-origin-main" title="main agent gate: has_candidates check">main gate</span>`
+      : '';
     return `<div class="pipeline-step">
       <div class="pipeline-step-card${miAnnotation ? ' has-mi' : ''}">
-        <div class="step-label">${escHtml(step.label)}</div>
+        <div class="step-label">${escHtml(step.label)}${mainGateBadge}</div>
         <div class="step-badge ${stCls}">${escHtml(step.status || '—')}</div>
         <div class="step-detail">${detail}</div>
         ${miAnnotation}

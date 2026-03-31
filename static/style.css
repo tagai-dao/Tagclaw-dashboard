@@ -768,8 +768,8 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: .5rem .65rem;
-  min-width: 110px;
-  max-width: 170px;
+  min-width: 90px;
+  max-width: 155px;
   transition: border-color .15s;
 }
 .pipeline-step-card:hover { border-color: var(--accent); }
@@ -799,7 +799,9 @@ html, body {
 .pipeline-step-card .step-badge.st-noop,
 .pipeline-step-card .step-badge.st-conservative { background: rgba(210,153,34,.15); color: var(--warn); }
 .pipeline-step-card .step-badge.st-blocked,
-.pipeline-step-card .step-badge.st-open { background: rgba(248,81,73,.15); color: var(--error); }
+.pipeline-step-card .step-badge.st-open,
+.pipeline-step-card .step-badge.st-stale { background: rgba(248,81,73,.15); color: var(--error); }
+.pipeline-step-card .step-badge.st-unknown { background: rgba(100,100,100,.12); color: var(--muted); }
 .pipeline-step-card .step-detail {
   font-size: .6rem;
   color: var(--muted);
@@ -821,11 +823,36 @@ html, body {
   font-size: .85rem;
   line-height: 1;
 }
-/* Pipeline steps row — wraps the horizontal step cards */
+/* Pipeline steps row — wraps for 6-step bookmarker pipeline */
 .pipeline-steps-row {
   display: flex;
   align-items: flex-start;
   gap: 0;
+  flex-wrap: wrap;
+  row-gap: .4rem;
+}
+.gate-summary {
+  font-size: .6rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: .15rem;
+}
+.threshold-row {
+  font-family: var(--mono);
+  font-size: .58rem;
+  color: var(--muted);
+}
+.tag-xs {
+  display: inline-block;
+  font-size: .55rem;
+  padding: 0 .25rem;
+  background: rgba(100,100,100,.12);
+  border-radius: 3px;
+  margin-bottom: 1px;
+}
+.mono-sm {
+  font-family: var(--mono);
+  font-size: .58rem;
 }
 
 /* Main influence context banner above bookmarker pipeline */
@@ -882,4 +909,141 @@ html, body {
   .pipeline-step { flex-direction: column; }
   .pipeline-step-card { max-width: none; }
   .pipeline-arrow { transform: rotate(90deg); width: auto; padding: .15rem 0; }
+}
+
+/* ── Step Origin Badges ── */
+.step-origin-badge {
+  display: inline-block;
+  font-size: .52rem;
+  font-weight: 600;
+  padding: .05rem .3rem;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: .25rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.step-origin-main {
+  background: rgba(240, 165, 0, .15);
+  border: 1px solid rgba(240, 165, 0, .35);
+  color: var(--warn);
+}
+
+/* ── TAS Panel (full-width, top of grid) ── */
+#tas-panel {
+  grid-column: 1 / -1;
+}
+
+.tas-panel-body {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.2fr) minmax(260px, 1.8fr) minmax(360px, 3fr);
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+/* Left: Current Values stacked above TAS_total chart */
+.tas-panel-left {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+/* Right charts column: TAS_social top, TAS_trade bottom */
+.tas-panel-right {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.tas-mini-wrap {
+  /* wrapper for TAS_total chart below Current Values */
+}
+
+.tas-mini-single {
+  /* individual sparkline slot */
+}
+
+/* legacy col — kept for calc col */
+.tas-panel-col {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.tas-total-display {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .15rem;
+}
+
+.tas-total-big {
+  font-family: var(--mono);
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* TAS Calculation Chain */
+.tas-calc-chain {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.tas-component {
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .5rem .65rem;
+}
+
+.tas-comp-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .3rem;
+}
+
+.tas-formula {
+  display: flex;
+  flex-direction: column;
+  gap: .18rem;
+}
+
+.tas-formula-line {
+  font-size: .7rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  padding-left: .6rem;
+}
+
+.tas-formula-result {
+  font-size: .7rem;
+  color: var(--text);
+  font-family: var(--mono);
+  border-top: 1px solid var(--border);
+  padding-top: .18rem;
+  margin-top: .1rem;
+}
+
+@media (max-width: 1300px) {
+  .tas-panel-body {
+    grid-template-columns: 1fr 1fr;
+  }
+  .tas-calc-col {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .tas-panel-body {
+    grid-template-columns: 1fr;
+  }
+  .tas-panel-left,
+  .tas-panel-right {
+    width: 100%;
+  }
 }

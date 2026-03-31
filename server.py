@@ -118,6 +118,16 @@ def _load_tas_history(limit: int = 20) -> list[dict[str, Any]]:
                 })
                 continue
 
+            # Mid schema: ts, OP, VP, TAS_social, TAS_trade, TAS_total, mode, desc
+            if len(parts) >= 6 and parts[0].startswith("20") and _to_float(parts[1]) is not None and _to_float(parts[5]) is not None:
+                points.append({
+                    "ts": parts[0],
+                    "tas_total": _to_float(parts[5]),
+                    "tas_social": _to_float(parts[3]),
+                    "tas_trade": _to_float(parts[4]),
+                })
+                continue
+
             # Newer lightweight schema: ts, main, heartbeat, TAS=1.292, OP=..., VP=...
             if len(parts) >= 4 and parts[0].startswith("20") and parts[3].startswith("TAS="):
                 points.append({
@@ -500,39 +510,69 @@ def _load_trade_actions(limit: int = 20) -> list[dict]:
 # ── Social Pipeline Builders ───────────────────────────────────────────────
 
 def _build_bookmarker_social_pipeline(
+    source_health: dict, topic_brief: dict, content_candidates: dict,
     auto_intent: dict, drafts: dict, execution: dict, write_state: dict,
     *, main_social_intent: dict | None = None, main_last_decision: dict | None = None,
 ) -> dict:
-    """Build bookmarker social execution pipeline summary for dashboard."""
-    # Step 1: Autonomy Intent
-    ai_mode = auto_intent.get("mode", "—")
-    ai_reason = auto_intent.get("reason", "")
-    ai_recommended = auto_intent.get("recommended_actions") or []
+    """Build bookmarker social execution pipeline summary for dashboard (6-step v2)."""
+    # Step 1: X Sync
+    sh_status = source_health.get("bird") or source_health.get("status") or "—"
+    sh_source = source_health.get("source_class", "—")
+    sh_updated = source_health.get("updated_at", "")
+    # Determine primary active source
+    active_src = "—"
+    for src_key in ("bird", "browser_relay", "xurl"):
+        if source_health.get(src_key) == "ok":
+            active_src = src_key
+            break
 
-    # Step 2: Social Drafts
+    # Step 2: Topic Brief
+    tb_keywords = topic_brief.get("keywords") or []
+    tb_summary = topic_brief.get("summary", "")
+    tb_urgency = topic_brief.get("content_urgency", "")
+
+    # Step 3: Content Candidates
+    raw_cands = content_candidates.get("items") or content_candidates.get("candidates") or []
+    # Filter out empty placeholder items (publish_ready=False without real content)
+    real_cands = [c for c in raw_cands if c.get("publish_ready") is not False or c.get("title") or c.get("url")]
+    cand_types: dict[str, int] = {}
+    for c in real_cands:
+        ct = c.get("type", "unknown")
+        cand_types[ct] = cand_types.get(ct, 0) + 1
+
+    # Step 4: Social Drafts
     draft_list = drafts.get("drafts") or []
     draft_types: dict[str, int] = {}
     for d in draft_list:
         dt = d.get("type", "unknown")
         draft_types[dt] = draft_types.get(dt, 0) + 1
+    drafts_meta = drafts.get("meta") or {}
+    x_items_seen = drafts_meta.get("x_items_seen", 0)
 
-    # Step 3: Execution
+    # Step 5: Autonomy Intent
+    ai_mode = auto_intent.get("mode", "—")
+    ai_reason = auto_intent.get("reason", "")
+    ai_recommended = auto_intent.get("recommended_actions") or []
+    ai_tas = auto_intent.get("tas_social_value")
+    ai_op = auto_intent.get("op")
+    thresholds = auto_intent.get("thresholds") or {}
+
+    # Step 6: Execution (includes breaker + filtering)
     exec_status = execution.get("status", "—")
     exec_summary = execution.get("summary") or {}
     exec_at = execution.get("generated_at", "")
     exec_mode = execution.get("autonomy_mode", "")
-
-    # Step 4: Breaker
     breaker = write_state.get("breaker") or {}
     breaker_state = breaker.get("state", "—")
     breaker_consecutive = breaker.get("consecutive_1010_failures", 0)
     breaker_until = breaker.get("until")
+    # Filtering: which draft types were filtered out by recommended_actions
+    filtered_types = [dt for dt in draft_types if dt not in ai_recommended] if ai_recommended else []
 
     # Main Agent influence on bookmarker pipeline
     _msi = main_social_intent or {}
     _mld = main_last_decision or {}
     _m_payload = _msi.get("payload") or {}
-    _m_meta = _msi.get("meta") or {}
     _m_guidance = auto_intent.get("main_guidance") or {}
 
     main_influence = {
@@ -550,16 +590,54 @@ def _build_bookmarker_social_pipeline(
     return {
         "steps": [
             {
-                "id": "autonomy",
-                "label": "Autonomy Intent",
-                "status": "active" if ai_mode in ("standard", "active") else ("hold" if ai_mode == "conservative" else "unknown"),
-                "data": {"mode": ai_mode, "reason": ai_reason[:120], "recommended_actions": ai_recommended},
+                "id": "x_sync",
+                "label": "X Sync",
+                "status": "ok" if sh_status == "ok" else ("stale" if sh_status else "unknown"),
+                "data": {
+                    "status": sh_status,
+                    "source": active_src,
+                    "source_class": sh_source,
+                    "updated_at": sh_updated,
+                },
             },
             {
-                "id": "drafts",
+                "id": "topic_brief",
+                "label": "Topic Brief",
+                "status": "ok" if tb_keywords else ("empty" if not tb_summary else "partial"),
+                "data": {
+                    "keywords": tb_keywords[:8],
+                    "summary": tb_summary[:100] if tb_summary else "",
+                    "urgency": tb_urgency,
+                },
+            },
+            {
+                "id": "content_candidates",
+                "label": "Content Candidates",
+                "status": "ok" if real_cands else "empty",
+                "data": {"count": len(real_cands), "types": cand_types},
+            },
+            {
+                "id": "social_drafts",
                 "label": "Social Drafts",
                 "status": "ok" if draft_list else "empty",
-                "data": {"count": len(draft_list), "types": draft_types},
+                "data": {"count": len(draft_list), "types": draft_types, "x_items_seen": x_items_seen},
+            },
+            {
+                "id": "autonomy_intent",
+                "label": "Autonomy Intent",
+                "status": "active" if ai_mode in ("standard", "active") else ("hold" if ai_mode == "conservative" else "unknown"),
+                "data": {
+                    "mode": ai_mode,
+                    "reason": ai_reason[:120],
+                    "recommended_actions": ai_recommended,
+                    "tas_social": ai_tas,
+                    "op": ai_op,
+                    "thresholds": {
+                        "tas_standard": thresholds.get("tas_standard", 0.5),
+                        "tas_active": thresholds.get("tas_active", 2.0),
+                        "op_active": thresholds.get("op_active", 800),
+                    },
+                },
             },
             {
                 "id": "execution",
@@ -572,16 +650,10 @@ def _build_bookmarker_social_pipeline(
                     "noop": exec_summary.get("noop", 0),
                     "executed_at": exec_at,
                     "autonomy_mode": exec_mode,
-                },
-            },
-            {
-                "id": "breaker",
-                "label": "Write Breaker",
-                "status": "open" if breaker_state == "open" else "closed",
-                "data": {
-                    "state": breaker_state,
-                    "consecutive_failures": breaker_consecutive,
-                    "until": breaker_until,
+                    "breaker_state": breaker_state,
+                    "breaker_consecutive": breaker_consecutive,
+                    "breaker_until": breaker_until,
+                    "filtered_types": filtered_types,
                 },
             },
         ],
@@ -589,33 +661,43 @@ def _build_bookmarker_social_pipeline(
     }
 
 
-def _build_main_social_pipeline(social_intent: dict, last_decision: dict) -> dict:
-    """Build main agent social execution pipeline summary for dashboard."""
-    # Step 1: Gate Checks
+def _build_main_social_pipeline(
+    social_intent: dict, last_decision: dict,
+    main_history_items: list[dict[str, Any]] | None = None,
+) -> dict:
+    """Build main agent social execution pipeline summary for dashboard (4-step v2)."""
+    # Step 1: Gate Checks (7 items)
     meta = social_intent.get("meta") or {}
     gate_checks = meta.get("gate_checks") or {}
+    gates_total = len(gate_checks)
+    gates_pass = sum(1 for v in gate_checks.values() if v)
+    gate_status = "unknown" if not gates_total else ("pass" if gates_pass == gates_total else ("partial" if gates_pass else "blocked"))
+
+    # Step 2: Social Intent
     payload = social_intent.get("payload") or {}
     authorized = payload.get("authorized", False)
     intent_status = social_intent.get("status", "—")
     intent_reason = social_intent.get("reason", "")
-
-    # Step 2: Social Decision
-    social_decision = last_decision.get("social_decision", "—")
-
-    # Step 3: Actions authorized
     actions = payload.get("actions") or []
     action_types: dict[str, int] = {}
     for a in actions:
         at = a.get("type", "unknown")
         action_types[at] = action_types.get(at, 0) + 1
 
+    # Step 3: CLI Wrapper (descriptive — main social actions go via scripts/main_social_action.py)
+
+    # Step 4: Decision & History
+    social_decision = last_decision.get("social_decision", "—")
+    ld_reason = last_decision.get("reason", "")
+    main_action_count = len(main_history_items or [])
+
     return {
         "steps": [
             {
                 "id": "gate_checks",
                 "label": "Gate Checks",
-                "status": "pass" if all(gate_checks.values()) else ("partial" if any(gate_checks.values()) else "blocked"),
-                "data": gate_checks,
+                "status": gate_status,
+                "data": {**gate_checks, "_pass_count": gates_pass, "_total": gates_total},
             },
             {
                 "id": "social_intent",
@@ -629,10 +711,24 @@ def _build_main_social_pipeline(social_intent: dict, last_decision: dict) -> dic
                 },
             },
             {
-                "id": "decision",
-                "label": "Decision",
+                "id": "cli_wrapper",
+                "label": "CLI Wrapper",
+                "status": "active",
+                "data": {
+                    "script": "scripts/main_social_action.py",
+                    "actor": "main",
+                    "records_to": "social-history.json",
+                },
+            },
+            {
+                "id": "decision_history",
+                "label": "Decision & History",
                 "status": social_decision,
-                "data": {"social_decision": social_decision},
+                "data": {
+                    "social_decision": social_decision,
+                    "reason": ld_reason[:120],
+                    "main_action_count": main_action_count,
+                },
             },
         ],
     }
@@ -700,7 +796,14 @@ def api_status():
             "tas_social": _to_float(tas_latest.get("tas_social")),
             "tas_trade": _to_float(tas_latest.get("tas_trade")),
         }
-        if not tas_history or tas_history[-1].get("ts") != current_ts:
+        if tas_history and tas_history[-1].get("ts") == current_ts:
+            tas_history[-1] = {
+                "ts": current_ts,
+                "tas_total": current_point["tas_total"] if current_point["tas_total"] is not None else tas_history[-1].get("tas_total"),
+                "tas_social": current_point["tas_social"] if current_point["tas_social"] is not None else tas_history[-1].get("tas_social"),
+                "tas_trade": current_point["tas_trade"] if current_point["tas_trade"] is not None else tas_history[-1].get("tas_trade"),
+            }
+        else:
             tas_history.append(current_point)
         tas_history = tas_history[-20:]
 
@@ -715,7 +818,7 @@ def api_status():
             "last_decision":  last_dec,
             "social_intent":  social_int,
             "social_actions": list(reversed((social_split.get("main") or [])[-20:])),
-            "social_pipeline": _build_main_social_pipeline(social_int, last_dec),
+            "social_pipeline": _build_main_social_pipeline(social_int, last_dec, social_split.get("main") or []),
         },
         "bookmarker": {
             "topic_brief":          topic_brief,
@@ -725,6 +828,7 @@ def api_status():
             "social_drafts":        social_drafts,
             "social_actions":       list(reversed((social_split.get("bookmarker") or [])[-20:])),
             "social_pipeline":      _build_bookmarker_social_pipeline(
+                src_health, topic_brief, bm_cands,
                 auto_intent, social_drafts, bm_exec, write_state,
                 main_social_intent=social_int, main_last_decision=last_dec,
             ),
