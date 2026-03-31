@@ -497,6 +497,126 @@ def _load_trade_actions(limit: int = 20) -> list[dict]:
     return deduped[:limit]
 
 
+# ── Social Pipeline Builders ───────────────────────────────────────────────
+
+def _build_bookmarker_social_pipeline(
+    auto_intent: dict, drafts: dict, execution: dict, write_state: dict,
+) -> dict:
+    """Build bookmarker social execution pipeline summary for dashboard."""
+    # Step 1: Autonomy Intent
+    ai_mode = auto_intent.get("mode", "—")
+    ai_reason = auto_intent.get("reason", "")
+    ai_recommended = auto_intent.get("recommended_actions") or []
+
+    # Step 2: Social Drafts
+    draft_list = drafts.get("drafts") or []
+    draft_types: dict[str, int] = {}
+    for d in draft_list:
+        dt = d.get("type", "unknown")
+        draft_types[dt] = draft_types.get(dt, 0) + 1
+
+    # Step 3: Execution
+    exec_status = execution.get("status", "—")
+    exec_summary = execution.get("summary") or {}
+    exec_at = execution.get("generated_at", "")
+    exec_mode = execution.get("autonomy_mode", "")
+
+    # Step 4: Breaker
+    breaker = write_state.get("breaker") or {}
+    breaker_state = breaker.get("state", "—")
+    breaker_consecutive = breaker.get("consecutive_1010_failures", 0)
+    breaker_until = breaker.get("until")
+
+    return {
+        "steps": [
+            {
+                "id": "autonomy",
+                "label": "Autonomy Intent",
+                "status": "active" if ai_mode in ("standard", "active") else ("hold" if ai_mode == "conservative" else "unknown"),
+                "data": {"mode": ai_mode, "reason": ai_reason[:120], "recommended_actions": ai_recommended},
+            },
+            {
+                "id": "drafts",
+                "label": "Social Drafts",
+                "status": "ok" if draft_list else "empty",
+                "data": {"count": len(draft_list), "types": draft_types},
+            },
+            {
+                "id": "execution",
+                "label": "Execution",
+                "status": exec_status,
+                "data": {
+                    "attempted": exec_summary.get("attempted", 0),
+                    "succeeded": exec_summary.get("succeeded", 0),
+                    "failed": exec_summary.get("failed", 0),
+                    "noop": exec_summary.get("noop", 0),
+                    "executed_at": exec_at,
+                    "autonomy_mode": exec_mode,
+                },
+            },
+            {
+                "id": "breaker",
+                "label": "Write Breaker",
+                "status": "open" if breaker_state == "open" else "closed",
+                "data": {
+                    "state": breaker_state,
+                    "consecutive_failures": breaker_consecutive,
+                    "until": breaker_until,
+                },
+            },
+        ],
+    }
+
+
+def _build_main_social_pipeline(social_intent: dict, last_decision: dict) -> dict:
+    """Build main agent social execution pipeline summary for dashboard."""
+    # Step 1: Gate Checks
+    meta = social_intent.get("meta") or {}
+    gate_checks = meta.get("gate_checks") or {}
+    payload = social_intent.get("payload") or {}
+    authorized = payload.get("authorized", False)
+    intent_status = social_intent.get("status", "—")
+    intent_reason = social_intent.get("reason", "")
+
+    # Step 2: Social Decision
+    social_decision = last_decision.get("social_decision", "—")
+
+    # Step 3: Actions authorized
+    actions = payload.get("actions") or []
+    action_types: dict[str, int] = {}
+    for a in actions:
+        at = a.get("type", "unknown")
+        action_types[at] = action_types.get(at, 0) + 1
+
+    return {
+        "steps": [
+            {
+                "id": "gate_checks",
+                "label": "Gate Checks",
+                "status": "pass" if all(gate_checks.values()) else ("partial" if any(gate_checks.values()) else "blocked"),
+                "data": gate_checks,
+            },
+            {
+                "id": "social_intent",
+                "label": "Social Intent",
+                "status": intent_status,
+                "data": {
+                    "authorized": authorized,
+                    "reason": intent_reason[:120],
+                    "action_count": len(actions),
+                    "action_types": action_types,
+                },
+            },
+            {
+                "id": "decision",
+                "label": "Decision",
+                "status": social_decision,
+                "data": {"social_decision": social_decision},
+            },
+        ],
+    }
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -530,6 +650,8 @@ def api_status():
     social_hist  = _safe("shared/social-history.json")          or {}
     social_split = _split_social_actions(social_hist.get("items") or [])
     social_drafts = _safe("bookmarker/social-drafts.json")      or {}
+    bm_exec      = _safe("bookmarker/social-execution.json")    or {}
+    write_state  = _safe("shared/social-write-state.json")      or {}
 
     # ── Trader ──
     wallet   = _safe("trader/wallet-snapshot.json") or {}
@@ -572,6 +694,7 @@ def api_status():
             "last_decision":  last_dec,
             "social_intent":  social_int,
             "social_actions": list(reversed((social_split.get("main") or [])[-20:])),
+            "social_pipeline": _build_main_social_pipeline(social_int, last_dec),
         },
         "bookmarker": {
             "topic_brief":          topic_brief,
@@ -580,6 +703,7 @@ def api_status():
             "autonomy_intent":      auto_intent,
             "social_drafts":        social_drafts,
             "social_actions":       list(reversed((social_split.get("bookmarker") or [])[-20:])),
+            "social_pipeline":      _build_bookmarker_social_pipeline(auto_intent, social_drafts, bm_exec, write_state),
             "x_posts":              (_xp := _parse_x_tweets(hours=24, limit=20)),
             "x_posts_window":       "24h" if _xp and _xp[0].get("date") and
                                     _is_within_hours(_xp[0].get("date",""), 24) else "recent",

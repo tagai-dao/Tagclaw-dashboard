@@ -16,6 +16,7 @@ const I18N = {
     'recent-cycles': '最近周期',
     'section-last-decision': '最新决策',
     'section-social-intent': '社交意图',
+    'section-social-pipeline': '社交执行链路',
     'panel-bookmarker': '文曲星智能体',
     'label-x-sync': 'X 同步',
     'label-last-sync': '上次同步',
@@ -156,6 +157,7 @@ const I18N = {
     'recent-cycles': 'Recent cycles',
     'section-last-decision': 'Last Decision',
     'section-social-intent': 'Social Intent',
+    'section-social-pipeline': 'Social Execution Pipeline',
     'panel-bookmarker': 'Bookmarker Agent',
     'label-x-sync': 'X Sync',
     'label-last-sync': 'Last Sync',
@@ -569,6 +571,64 @@ function renderMain(main) {
   }
 
   renderSocialActionsList('main-actions-list', sa);
+
+  // Pipeline
+  renderPipeline('main-social-pipeline', main.social_pipeline, 'main');
+}
+
+// ── Social Pipeline Renderer ──
+function renderPipeline(elId, pipeline, agent) {
+  const el = $(elId);
+  if (!el || !pipeline || !pipeline.steps) { if (el) el.innerHTML = '<div class="muted small">—</div>'; return; }
+  const steps = pipeline.steps;
+  el.innerHTML = steps.map((step, i) => {
+    const arrow = i < steps.length - 1 ? '<div class="pipeline-arrow">→</div>' : '';
+    const stCls = 'st-' + (step.status || '').toLowerCase().replace(/[^a-z-]/g, '');
+    let detail = '';
+    if (agent === 'main' && step.id === 'gate_checks') {
+      const checks = step.data || {};
+      detail = Object.entries(checks).map(([k, v]) =>
+        `<div class="gate-item"><span class="${v ? 'gate-pass' : 'gate-fail'}">${v ? '✓' : '✗'}</span> ${escHtml(k)}</div>`
+      ).join('');
+    } else if (agent === 'main' && step.id === 'social_intent') {
+      const d = step.data || {};
+      detail = `authorized: ${d.authorized ? '✓' : '✗'}`;
+      if (d.action_count) detail += ` · ${d.action_count} actions`;
+      if (d.reason) detail += `<br>${escHtml(d.reason.slice(0, 80))}`;
+    } else if (agent === 'bookmarker' && step.id === 'autonomy') {
+      const d = step.data || {};
+      detail = `mode: ${escHtml(d.mode || '—')}`;
+      if (d.recommended_actions?.length) detail += `<br>→ ${d.recommended_actions.join(', ')}`;
+    } else if (agent === 'bookmarker' && step.id === 'drafts') {
+      const d = step.data || {};
+      detail = `${d.count || 0} drafts`;
+      const types = d.types || {};
+      if (Object.keys(types).length) detail += ': ' + Object.entries(types).map(([k,v]) => `${k}×${v}`).join(' ');
+    } else if (agent === 'bookmarker' && step.id === 'execution') {
+      const d = step.data || {};
+      const parts = [];
+      if (d.attempted) parts.push(`${d.succeeded}/${d.attempted} ok`);
+      if (d.failed) parts.push(`${d.failed} fail`);
+      if (d.noop) parts.push(`${d.noop} noop`);
+      detail = parts.join(' · ') || '—';
+      if (d.executed_at) detail += `<br>${shortTs(d.executed_at)}`;
+    } else if (step.id === 'breaker') {
+      const d = step.data || {};
+      detail = d.state || '—';
+      if (d.consecutive_failures) detail += ` · ${d.consecutive_failures} consecutive`;
+      if (d.until) detail += `<br>until ${shortTs(d.until)}`;
+    } else if (step.id === 'decision') {
+      detail = step.data?.social_decision || '—';
+    }
+    return `<div class="pipeline-step">
+      <div class="pipeline-step-card">
+        <div class="step-label">${escHtml(step.label)}</div>
+        <div class="step-badge ${stCls}">${escHtml(step.status || '—')}</div>
+        <div class="step-detail">${detail}</div>
+      </div>
+      ${arrow}
+    </div>`;
+  }).join('');
 }
 
 // ── X Section Toggle ──
@@ -659,6 +719,7 @@ function renderBookmarker(bm) {
     }
   }
 
+  renderPipeline('bm-social-pipeline', bm.social_pipeline, 'bookmarker');
   renderSocialActionsList('bm-actions-list', bm.social_actions || []);
 
   // ── X Posts ──
