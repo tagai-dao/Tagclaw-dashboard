@@ -685,6 +685,9 @@ function renderMain(main) {
   const ip  = main.input_packet   || {};
   const tas = main.tas_latest     || {};
   const dec = main.last_decision  || {};
+  const sp  = main.strategy_plan  || {};
+  const ba  = main.budget_allocation || {};
+  const att = main.latest_attribution || {};
   const si  = main.social_intent  || {};
   const sa  = main.social_actions || [];
   const sum = ip.summary || {};
@@ -705,6 +708,38 @@ function renderMain(main) {
     dec.reason || null,
   ].filter(Boolean).join('\n') || '—';
   setText('main-decision', decText);
+
+  const strategyEl = $('main-strategy-plan');
+  if (strategyEl) {
+    const metrics = (sp.target_metrics || []).join(', ');
+    const expected = sp.expected_uplift || {};
+    strategyEl.innerHTML = `
+      <div><strong>${escHtml(sp.strategy_action || dec.strategy_action || '—')}</strong></div>
+      <div class="muted small">${escHtml(sp.hypothesis || dec.planning_focus || '—')}</div>
+      <div class="muted small">targets: ${escHtml(metrics || '—')} · confidence: ${sp.confidence != null ? fmt(sp.confidence) : '—'}</div>
+      <div class="muted small">uplift → TAS ${expected.tas != null ? fmt(expected.tas) : '—'} · social ${expected.tas_social != null ? fmt(expected.tas_social) : '—'} · trade ${expected.tas_trade != null ? fmt(expected.tas_trade) : '—'}</div>`;
+  }
+
+  const budgetEl = $('main-budget-allocation');
+  if (budgetEl) {
+    const alloc = ba.allocations || {};
+    budgetEl.innerHTML = listHtml([
+      { title: 'Bookmarker / social', sub: `OP ${fmtNum(alloc.bookmarker?.op_budget)} · VP ${fmtNum(alloc.bookmarker?.vp_budget)}`, right: alloc.bookmarker?.authorized ? 'active' : 'hold' },
+      { title: 'Trader / treasury', sub: `$${fmt(alloc.trader?.usd_budget)} · risk ${alloc.trader?.risk_budget || ba.risk_budget || '—'}`, right: alloc.trader?.authorized ? 'active' : 'hold' },
+      { title: 'Claude Dispatch / dev', sub: `slots ${alloc.claude_dispatch?.slots ?? ba.dev_budget ?? 0}`, right: ba.dev_budget ? 'on' : 'off' },
+      { title: 'Main reserve', sub: `OP ${fmtNum(alloc.main?.reserve_op)} · VP ${fmtNum(alloc.main?.reserve_vp)}`, right: ba.attention_budget || '—' },
+    ]);
+  }
+
+  const attEl = $('main-attribution');
+  if (attEl) {
+    const contrib = att.agent_contributions || {};
+    attEl.innerHTML = listHtml([
+      { title: 'TAS delta', sub: `before ${att.tas_before != null ? fmt(att.tas_before, 3) : '—'} → after ${att.tas_after != null ? fmt(att.tas_after, 3) : '—'}`, right: att.tas_delta != null ? fmt(att.tas_delta, 3) : '—' },
+      { title: 'Attribution confidence', sub: `recommendation: ${att.scale_recommendation || '—'}`, right: att.attribution_confidence != null ? fmt(att.attribution_confidence) : '—' },
+      { title: 'Bookmarker / Trader / Dispatch', sub: `B=${contrib.bookmarker != null ? fmt(contrib.bookmarker) : '—'} · T=${contrib.trader != null ? fmt(contrib.trader) : '—'} · D=${contrib.claude_dispatch != null ? fmt(contrib.claude_dispatch) : '—'}`, right: att.strategy_id || '—' },
+    ]);
+  }
 
   const actions = si.payload?.actions || [];
   const intentEl = $('main-social-intent');
@@ -890,6 +925,7 @@ function renderBookmarker(bm) {
   const src   = bm.source_health       || {};
   const brief = bm.topic_brief         || {};
   const cands = bm.content_candidates  || {};
+  const tperf = bm.topic_performance   || {};
   const auto  = bm.autonomy_intent     || {};
 
   const xSync = src.x_sync || {};
@@ -913,12 +949,24 @@ function renderBookmarker(bm) {
   const candsEl = $('bm-cands-list');
   if (candsEl) {
     candsEl.innerHTML = listHtml(
-      candidateList.slice(0, 3).map(c => ({
-        title: c.title || c.headline || c.url || JSON.stringify(c).slice(0, 80),
-        sub:   c.type || c.source || '',
-        right: c.score != null ? fmt(c.score) : '',
+      candidateList.slice(0, 5).map(c => ({
+        title: c.title || c.headline || c.summary || c.url || JSON.stringify(c).slice(0, 80),
+        sub:   `${c.type || c.source || ''}${c.recommended_action ? ' · ' + c.recommended_action : ''}${c.confidence != null ? ' · conf ' + fmt(c.confidence) : ''}`,
+        right: c.expected_tas_social_uplift != null ? fmt(c.expected_tas_social_uplift) : (c.score != null ? fmt(c.score) : ''),
       }))
     );
+  }
+
+  const cqEl = $('bm-candidate-quality');
+  if (cqEl) {
+    const top = candidateList[0] || {};
+    const mix = cands.recommended_action_mix || tperf.recommended_action_mix || {};
+    const mixText = Object.entries(mix).map(([k,v]) => `${k}×${v}`).join(' · ');
+    cqEl.innerHTML = listHtml([
+      { title: 'Top candidate', sub: `${top.candidate_id || tperf.top_candidate_id || '—'}${top.theme ? ' · ' + top.theme : ''}`, right: top.expected_tas_social_uplift != null ? fmt(top.expected_tas_social_uplift) : (tperf.top_candidate_uplift != null ? fmt(tperf.top_candidate_uplift) : '—') },
+      { title: 'Recommended action mix', sub: mixText || '—', right: `${candidateList.length} ranked` },
+      { title: 'Topic performance', sub: (tperf.keywords || []).slice(0, 4).join(', ') || '—', right: tperf.theme || '—' },
+    ]);
   }
 
   // Social Drafts
@@ -1030,6 +1078,9 @@ function renderTrader(trader) {
   const tasT    = trader.tas_trade         || {};
   const risk    = trader.risk_status       || {};
   const onchain = trader.onchain_positions || {};
+  const baseline = trader.portfolio_baseline || {};
+  const delta = trader.portfolio_delta || {};
+  const mqual = trader.measurement_quality || {};
 
   setText('trader-tas', fmt(tasT.value ?? tasT.score ?? tasT.tas_trade));
   const trMode = tasT.autonomy_mode || '—';
@@ -1084,6 +1135,15 @@ function renderTrader(trader) {
         right: `${fmtNum(r.claimable_amount)} ($${fmt(r.reward_value_usd)})`,
       })));
     }
+  }
+
+  const qualEl = $('trader-measurement-quality');
+  if (qualEl) {
+    qualEl.innerHTML = listHtml([
+      { title: 'Overall quality', sub: `actionability ${mqual.actionability || '—'} · confidence ${mqual.overall_confidence != null ? fmt(mqual.overall_confidence) : '—'}`, right: mqual.overall_status || '—' },
+      { title: 'Visibility', sub: `wallet ${mqual.wallet_visibility || '—'} · price ${mqual.price_visibility || '—'} · reward ${mqual.reward_visibility || '—'}`, right: `cost basis ${mqual.cost_basis_quality || '—'}` },
+      { title: 'Baseline / delta', sub: `known $${baseline.portfolio_value_usd_known != null ? fmt(baseline.portfolio_value_usd_known) : '—'} · Δ $${delta.portfolio_value_usd_delta != null ? fmt(delta.portfolio_value_usd_delta) : '—'}`, right: delta.status || '—' },
+    ]);
   }
 
   const flagEl = $('trader-risk-flags');
@@ -1157,8 +1217,45 @@ function inferResultLinks(result) {
 function renderDev(dev) {
   const status = dev.status || {};
   const result = dev.result || {};
+  const stage = dev.stage_status || {};
+  const backlog = dev.backlog || {};
+  const roi = dev.dispatch_roi || {};
   setBadge('dev-status-badge', result.status || status.status || '—');
+  setBadge('dev-stage-badge', stage.status || '—');
   setText('dev-completed-at', shortTs(result.completed_at || status.updated_at || status.started_at));
+
+  const roiEl = $('dev-dispatch-roi');
+  if (roiEl) {
+    roiEl.innerHTML = listHtml([
+      { title: 'Target metric', sub: roi.target_metric || '—', right: roi.roi_status || '—' },
+      { title: 'Expected TAS impact', sub: `task: ${roi.task_id || '—'}`, right: roi.expected_tas_impact != null ? fmt(roi.expected_tas_impact) : '—' },
+    ]);
+  }
+
+  const stageEl = $('dev-stage-summary');
+  if (stageEl) {
+    const gateVerdicts = stage.gate_verdicts || {};
+    const gates = ['build', 'review', 'qa', 'release', 'retro'];
+    stageEl.innerHTML = listHtml(gates.map(g => ({
+      title: g,
+      sub: `verdict: ${gateVerdicts[g] || 'pending'}`,
+      right: stage.current_stage === g ? '← current' : '',
+    })));
+  }
+
+  const backlogEl = $('dev-backlog-list');
+  if (backlogEl) {
+    const items = (backlog.items || []).slice(0, 5);
+    if (!items.length) {
+      backlogEl.innerHTML = `<div class="muted small">No backlog items</div>`;
+    } else {
+      backlogEl.innerHTML = listHtml(items.map(it => ({
+        title: it.title || it.id || '—',
+        sub: `${it.target_metric || '—'} · impact ${it.expected_tas_impact != null ? fmt(it.expected_tas_impact) : '—'} · ${it.status || '—'}`,
+        right: it.priority != null ? fmt(it.priority) : '—',
+      })));
+    }
+  }
 
   const builtEl = $('dev-built-list');
   if (builtEl) {

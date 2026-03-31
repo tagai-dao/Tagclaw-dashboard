@@ -757,12 +757,16 @@ def api_status():
     input_pkt    = _safe("main/input-packet.json")   or {}
     tas_latest   = _safe("main/tas-latest.json")     or {}
     last_dec     = _safe("main/last-decision.json")  or {}
+    strategy_plan = _safe("main/strategy-plan.json") or {}
     social_int   = _safe("main/social-intent.json")  or {}
+    budget_alloc = _safe("shared/budget-allocation.json") or {}
+    attribution  = _safe("shared/latest-attribution.json") or {}
 
     # ── Bookmarker ──
     topic_brief  = _safe("bookmarker/topic-brief.json")         or {}
     src_health   = _safe("bookmarker/source-health.json")       or {}
     bm_cands     = _safe("bookmarker/content-candidates.json")  or {}
+    bm_topic_perf = _safe("bookmarker/topic-performance.json")  or {}
     auto_intent  = _safe("bookmarker/autonomy-intent.json")     or {}
     social_hist  = _safe("shared/social-history.json")          or {}
     social_split = _split_social_actions(social_hist.get("items") or [])
@@ -776,10 +780,16 @@ def api_status():
     tas_trd  = _safe("trader/tas-trade.json")       or {}
     risk     = _safe("trader/risk-status.json")     or {}
     onchain  = _safe("trader/onchain-positions.json") or {}
+    portfolio_baseline = _safe("trader/portfolio-baseline.json") or {}
+    portfolio_delta = _safe("trader/portfolio-delta.json") or {}
+    measurement_quality = _safe("trader/measurement-quality.json") or {}
 
     # ── Claude Dispatch / Dev ──
     dev_status = _safe("dev/status.json") or {}
     dev_result = _safe("dev/result.json") or {}
+    dev_stage  = _safe("dev/stage-status.json") or {}
+    dev_backlog = _safe("dev/backlog.json") or {}
+    dev_roi = _safe("dev/dispatch-roi.json") or {}
 
     # strip private key fields defensively
     if "private_key" in wallet:
@@ -816,6 +826,9 @@ def api_status():
             "tas_latest":     tas_latest,
             "tas_history":    tas_history,
             "last_decision":  last_dec,
+            "strategy_plan":  strategy_plan,
+            "budget_allocation": budget_alloc,
+            "latest_attribution": attribution,
             "social_intent":  social_int,
             "social_actions": list(reversed((social_split.get("main") or [])[-20:])),
             "social_pipeline": _build_main_social_pipeline(social_int, last_dec, social_split.get("main") or []),
@@ -824,6 +837,7 @@ def api_status():
             "topic_brief":          topic_brief,
             "source_health":        src_health,
             "content_candidates":   bm_cands,
+            "topic_performance":    bm_topic_perf,
             "autonomy_intent":      auto_intent,
             "social_drafts":        social_drafts,
             "social_actions":       list(reversed((social_split.get("bookmarker") or [])[-20:])),
@@ -847,11 +861,17 @@ def api_status():
             "tas_trade":         tas_trd,
             "risk_status":       risk,
             "onchain_positions": onchain,
+            "portfolio_baseline": portfolio_baseline,
+            "portfolio_delta": portfolio_delta,
+            "measurement_quality": measurement_quality,
             "trade_actions":     _load_trade_actions(limit=20),
         },
         "dev_dispatch": {
             "status": dev_status,
             "result": dev_result,
+            "stage_status": dev_stage,
+            "backlog": dev_backlog,
+            "dispatch_roi": dev_roi,
         },
     })
 

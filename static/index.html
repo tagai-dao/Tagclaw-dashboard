@@ -164,6 +164,20 @@
     <div class="section-label" data-i18n="section-last-decision">Last Decision</div>
     <div id="main-decision" class="text-block muted">—</div>
 
+    <div class="row-panels strategy-row">
+      <div class="half-panel">
+        <div class="section-label">Current Strategy</div>
+        <div id="main-strategy-plan" class="text-block muted">—</div>
+      </div>
+      <div class="half-panel">
+        <div class="section-label">Budget Allocation</div>
+        <div id="main-budget-allocation" class="list-block">—</div>
+      </div>
+    </div>
+
+    <div class="section-label">Attribution</div>
+    <div id="main-attribution" class="list-block">—</div>
+
     <div class="section-label" data-i18n="section-social-intent">Social Intent</div>
     <div id="main-social-intent" class="list-block">—</div>
 
@@ -202,6 +216,9 @@
     <div id="bm-cands-collapsible" class="x-collapsible">
       <div id="bm-cands-list" class="list-block">—</div>
     </div>
+
+    <div class="section-label">Candidate Quality</div>
+    <div id="bm-candidate-quality" class="list-block">—</div>
 
     <div class="x-section-header" onclick="toggleSection('bm-drafts')">
       <span class="section-label" data-i18n="section-social-drafts">Social Drafts</span>
@@ -248,6 +265,9 @@
       </div>
     </div>
 
+    <div class="section-label">Measurement Quality</div>
+    <div id="trader-measurement-quality" class="list-block">—</div>
+
     <div class="x-section-header" onclick="toggleSection('risk-flags')">
       <span class="section-label" data-i18n="section-risk-flags">Risk Flags</span>
       <button id="risk-flags-toggle" class="x-toggle-btn">▼</button>
@@ -268,8 +288,23 @@
 
     <div class="row compact">
       <div class="kv"><span class="k" data-i18n="label-status">Status</span><span id="dev-status-badge" class="badge sm">—</span></div>
+      <div class="kv"><span class="k">Stage</span><span id="dev-stage-badge" class="badge sm">—</span></div>
       <div class="kv"><span class="k" data-i18n="label-completed-at">Completed</span><span class="v mono" id="dev-completed-at">—</span></div>
     </div>
+
+    <div class="row-panels strategy-row">
+      <div class="half-panel">
+        <div class="section-label">Dispatch ROI</div>
+        <div id="dev-dispatch-roi" class="list-block">—</div>
+      </div>
+      <div class="half-panel">
+        <div class="section-label">Active Stage Gate</div>
+        <div id="dev-stage-summary" class="list-block">—</div>
+      </div>
+    </div>
+
+    <div class="section-label">Dispatch Backlog</div>
+    <div id="dev-backlog-list" class="list-block">—</div>
 
     <div class="section-label" data-i18n="section-built-tools">Built Software / Tools</div>
     <div id="dev-built-list" class="list-block">—</div>
