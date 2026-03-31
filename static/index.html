@@ -87,32 +87,38 @@
         <div class="section-label" data-i18n="section-tas-calc">Calculation Logic</div>
         <div class="tas-calc-chain">
 
-          <!-- TAS_SOCIAL -->
+          <!-- TAS_SOCIAL (collapsible, default collapsed) -->
           <div class="tas-component">
-            <div class="tas-comp-header">
+            <div class="tas-comp-header x-section-header" onclick="toggleSection('tas-calc-social-detail')">
               <span class="badge sm" style="color:#58a6ff;border-color:rgba(88,166,255,.3);background:rgba(88,166,255,.08)">TAS_social</span>
               <span id="tas-calc-social" class="mono small muted">—</span>
+              <button id="tas-calc-social-detail-toggle" class="x-toggle-btn" style="margin-left:auto">▼</button>
             </div>
-            <div class="tas-formula">
-              <div class="tas-formula-line"><span data-i18n="tas-formula-align-src">0xNought 互动</span> <span class="muted">(likes×1 + comments×5 + retweets×3)</span></div>
-              <div class="tas-formula-line">↓ align_score = <span id="tas-align-score" class="mono clr-ok">—</span></div>
-              <div class="tas-formula-line"><span data-i18n="tas-formula-community-src">社区互动</span> <span class="muted">feed engagement</span></div>
-              <div class="tas-formula-line">↓ community_score = <span id="tas-community-score" class="mono clr-ok">—</span></div>
-              <div class="tas-formula-result">TAS_social = <span class="mono muted">0.7</span> × align + <span class="mono muted">0.3</span> × community <span class="muted small" data-i18n="tas-window-label">(24h window)</span></div>
+            <div id="tas-calc-social-detail-collapsible" class="x-collapsible">
+              <div class="tas-formula">
+                <div class="tas-formula-line"><span data-i18n="tas-formula-align-src">0xNought 互动</span> <span class="muted">(likes×1 + comments×5 + retweets×3)</span></div>
+                <div class="tas-formula-line">↓ align_score = <span id="tas-align-score" class="mono clr-ok">—</span></div>
+                <div class="tas-formula-line"><span data-i18n="tas-formula-community-src">社区互动</span> <span class="muted">feed engagement</span></div>
+                <div class="tas-formula-line">↓ community_score = <span id="tas-community-score" class="mono clr-ok">—</span></div>
+                <div class="tas-formula-result">TAS_social = <span class="mono muted">0.7</span> × align + <span class="mono muted">0.3</span> × community <span class="muted small" data-i18n="tas-window-label">(24h window)</span></div>
+              </div>
             </div>
           </div>
 
-          <!-- TAS_TRADE -->
+          <!-- TAS_TRADE (collapsible, default collapsed) -->
           <div class="tas-component">
-            <div class="tas-comp-header">
+            <div class="tas-comp-header x-section-header" onclick="toggleSection('tas-calc-trade-detail')">
               <span class="badge sm" style="color:#f0a500;border-color:rgba(240,165,0,.3);background:rgba(240,165,0,.08)">TAS_trade</span>
               <span id="tas-calc-trade" class="mono small muted">—</span>
+              <button id="tas-calc-trade-detail-toggle" class="x-toggle-btn" style="margin-left:auto">▼</button>
             </div>
-            <div class="tas-formula">
-              <div class="tas-formula-line">base_value = <span id="tas-base-value" class="mono">—</span></div>
-              <div class="tas-formula-line">claim_history_score = <span id="tas-claim-history" class="mono">—</span></div>
-              <div class="tas-formula-line">holding_trend = <span id="tas-holding-trend" class="mono">—</span></div>
-              <div class="tas-formula-result">TAS_trade = min(1.0, base×0.6 + claim×0.2 + holding×0.2) <span class="muted small" data-i18n="tas-window-label">(24h window)</span></div>
+            <div id="tas-calc-trade-detail-collapsible" class="x-collapsible">
+              <div class="tas-formula">
+                <div class="tas-formula-line">base_value = <span id="tas-base-value" class="mono">—</span></div>
+                <div class="tas-formula-line">claim_history_score = <span id="tas-claim-history" class="mono">—</span></div>
+                <div class="tas-formula-line">holding_trend = <span id="tas-holding-trend" class="mono">—</span></div>
+                <div class="tas-formula-result">TAS_trade = min(1.0, base×0.6 + claim×0.2 + holding×0.2) <span class="muted small" data-i18n="tas-window-label">(24h window)</span></div>
+              </div>
             </div>
           </div>
 
