@@ -118,6 +118,16 @@ def _load_tas_history(limit: int = 20) -> list[dict[str, Any]]:
                 })
                 continue
 
+            # Mid schema: ts, OP, VP, TAS_social, TAS_trade, TAS_total, mode, desc
+            if len(parts) >= 6 and parts[0].startswith("20") and _to_float(parts[1]) is not None and _to_float(parts[5]) is not None:
+                points.append({
+                    "ts": parts[0],
+                    "tas_total": _to_float(parts[5]),
+                    "tas_social": _to_float(parts[3]),
+                    "tas_trade": _to_float(parts[4]),
+                })
+                continue
+
             # Newer lightweight schema: ts, main, heartbeat, TAS=1.292, OP=..., VP=...
             if len(parts) >= 4 and parts[0].startswith("20") and parts[3].startswith("TAS="):
                 points.append({
@@ -786,7 +796,14 @@ def api_status():
             "tas_social": _to_float(tas_latest.get("tas_social")),
             "tas_trade": _to_float(tas_latest.get("tas_trade")),
         }
-        if not tas_history or tas_history[-1].get("ts") != current_ts:
+        if tas_history and tas_history[-1].get("ts") == current_ts:
+            tas_history[-1] = {
+                "ts": current_ts,
+                "tas_total": current_point["tas_total"] if current_point["tas_total"] is not None else tas_history[-1].get("tas_total"),
+                "tas_social": current_point["tas_social"] if current_point["tas_social"] is not None else tas_history[-1].get("tas_social"),
+                "tas_trade": current_point["tas_trade"] if current_point["tas_trade"] is not None else tas_history[-1].get("tas_trade"),
+            }
+        else:
             tas_history.append(current_point)
         tas_history = tas_history[-20:]
 
