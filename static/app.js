@@ -469,23 +469,62 @@ function numericOrNull(v) {
 }
 
 function sparklineSvg(values, color) {
-  const width = 220;
-  const height = 70;
-  const padX = 10;
-  const padY = 10;
+  const width  = 230;
+  const height = 75;
+  const padX   = 8;
+  const padY   = 8;
+  const botPad = 16;  // extra bottom for axis label
+
+  const chartH = height - padY - botPad;
+
   const valid = values.map((v, i) => ({ v: numericOrNull(v), i })).filter(p => p.v !== null);
   if (!valid.length) {
-    return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="10">${t('no-tas-history')}</text></svg>`;
+    return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="9">${t('no-tas-history')}</text></svg>`;
   }
-  const min = Math.min(...valid.map(p => p.v));
-  const max = Math.max(...valid.map(p => p.v));
-  const span = Math.max(max - min, 0.0001);
-  const count = Math.max(values.length - 1, 1);
-  const toX = i => padX + (i / count) * (width - padX * 2);
-  const toY = v => height - padY - ((v - min) / span) * (height - padY * 2);
-  const pts = valid.map(p => `${toX(p.i)},${toY(p.v)}`);
-  const dots = valid.map(p => `<circle cx="${toX(p.i)}" cy="${toY(p.v)}" r="2.3" fill="${color}" />`).join('');
-  return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><line x1="${padX}" y1="${height-padY}" x2="${width-padX}" y2="${height-padY}" stroke="rgba(255,255,255,0.08)" stroke-width="1" /><polyline fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />${dots}</svg>`;
+
+  const rawMin = Math.min(...valid.map(p => p.v));
+  const rawMax = Math.max(...valid.map(p => p.v));
+  // Pad Y range by 15% so line doesn't hug edges
+  const span   = Math.max(rawMax - rawMin, 0.01);
+  const yMin   = Math.max(0, rawMin - span * 0.15);
+  const yMax   = rawMax + span * 0.15;
+  const ySpan  = Math.max(yMax - yMin, 0.001);
+
+  const count  = Math.max(values.length - 1, 1);
+  const toX    = i => padX + (i / count) * (width - padX * 2);
+  const toY    = v => padY + chartH - ((v - yMin) / ySpan) * chartH;
+  const baseY  = padY + chartH;
+
+  // Area fill polygon: line points + baseline corners
+  const linePts  = valid.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
+  const areaPath = `${linePts.join(' ')} ${toX(valid[valid.length - 1].i).toFixed(1)},${baseY.toFixed(1)} ${toX(valid[0].i).toFixed(1)},${baseY.toFixed(1)}`;
+
+  // Extract RGB from hex color for rgba fill
+  const hexToRgb = h => { const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h); return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '255,255,255'; };
+  const rgb = hexToRgb(color);
+
+  const dots = valid.map(p =>
+    `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2.5" fill="${color}" opacity="0.9"/>`
+  ).join('');
+
+  // Y-axis value labels: min and max
+  const yMinLbl = rawMin % 1 === 0 ? rawMin.toFixed(0) : rawMin.toFixed(2);
+  const yMaxLbl = rawMax % 1 === 0 ? rawMax.toFixed(0) : rawMax.toFixed(2);
+
+  return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline">
+    <defs>
+      <linearGradient id="grad-${rgb.replace(/,/g,'-')}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0.03"/>
+      </linearGradient>
+    </defs>
+    <line x1="${padX}" y1="${baseY.toFixed(1)}" x2="${(width-padX).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+    <polygon points="${areaPath}" fill="url(#grad-${rgb.replace(/,/g,'-')})" />
+    <polyline fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${linePts.join(' ')}"/>
+    ${dots}
+    <text x="${padX}" y="${(baseY + 11).toFixed(1)}" font-size="7.5" fill="rgba(255,255,255,0.3)">${yMinLbl}</text>
+    <text x="${(width - padX).toFixed(1)}" y="${(baseY + 11).toFixed(1)}" text-anchor="end" font-size="7.5" fill="rgba(255,255,255,0.3)">${yMaxLbl}</text>
+  </svg>`;
 }
 
 function _renderTasMiniCard(elId, label, color, values, latest, firstTs, lastTs) {
@@ -507,9 +546,16 @@ function _renderTasMiniCard(elId, label, color, values, latest, firstTs, lastTs)
 }
 
 function renderTasHistory(history, tas) {
-  const points = Array.isArray(history) ? history : [];
-  const firstTs = points[0]?.ts ? shortTs(points[0].ts) : '—';
-  const lastTs  = points[points.length - 1]?.ts ? shortTs(points[points.length - 1].ts) : '—';
+  const allPoints = Array.isArray(history) ? history : [];
+
+  // Filter to last 3 days (72h) for better readability of recent trends
+  const cutoffMs = Date.now() - 72 * 60 * 60 * 1000;
+  let points = allPoints.filter(p => {
+    if (!p.ts) return false;
+    try { return new Date(p.ts).getTime() >= cutoffMs; } catch { return false; }
+  });
+  // Fallback: if < 3 points in 72h, show last 8 points from full history
+  if (points.length < 3) points = allPoints.slice(-8);
 
   const metrics = [
     { key: 'tas_social', elId: 'tas-history-social', label: 'TAS_social', color: '#58a6ff' },
@@ -524,6 +570,9 @@ function renderTasHistory(history, tas) {
     });
     return;
   }
+
+  const firstTs = points[0]?.ts ? shortTs(points[0].ts) : '—';
+  const lastTs  = points[points.length - 1]?.ts ? shortTs(points[points.length - 1].ts) : '—';
 
   metrics.forEach(m => {
     const values = points.map(p => p[m.key]);
