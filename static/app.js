@@ -12,6 +12,13 @@ const I18N = {
     'label-op': 'OP',
     'label-vp': 'VP',
     'label-mode': '模式',
+    'panel-tas': 'TAS 指标',
+    'section-tas-values': '当前数值',
+    'section-tas-calc': '计算逻辑',
+    'label-tas-total': 'TAS 总分',
+    'tas-formula-align-src': '0xNought 互动',
+    'tas-formula-community-src': '社区互动',
+    'tas-window-label': '(24h 滚动窗口)',
     'section-tas': 'TAS 组件',
     'recent-cycles': '最近周期',
     'section-last-decision': '最新决策',
@@ -154,6 +161,13 @@ const I18N = {
     'label-op': 'OP',
     'label-vp': 'VP',
     'label-mode': 'Mode',
+    'panel-tas': 'TAS Components',
+    'section-tas-values': 'Current Values',
+    'section-tas-calc': 'Calculation Logic',
+    'label-tas-total': 'TAS Total',
+    'tas-formula-align-src': '0xNought Interactions',
+    'tas-formula-community-src': 'Community Engagement',
+    'tas-window-label': '(24h rolling window)',
     'section-tas': 'TAS Components',
     'recent-cycles': 'Recent cycles',
     'section-last-decision': 'Last Decision',
@@ -440,6 +454,7 @@ function renderStatus(data) {
     totalEl.className = 'value ' + (tasTotal >= 1.5 ? 'clr-ok' : tasTotal >= 0.8 ? 'clr-warn' : 'clr-error');
   }
 
+  renderTas(data);
   renderMain(data.main || {});
   renderBookmarker(data.bookmarker || {});
   renderTrader(data.trader || {});
@@ -474,7 +489,7 @@ function sparklineSvg(values, color) {
 }
 
 function renderTasHistory(history, tas) {
-  const el = $('main-tas-history');
+  const el = $('tas-history');
   if (!el) return;
   const points = Array.isArray(history) ? history : [];
   if (!points.length) {
@@ -527,6 +542,81 @@ function renderSocialActionsList(elId, actions) {
   }).join('');
 }
 
+// ── TAS Panel ──
+function renderTas(data) {
+  const tas     = (data.main   || {}).tas_latest  || {};
+  const history = (data.main   || {}).tas_history || [];
+  const tradeD  = (data.trader || {}).tas_trade   || {};
+
+  const social = numericOrNull(tas.tas_social);
+  const trade  = numericOrNull(tas.tas_trade);
+  const total  = numericOrNull(tas.tas_total);
+
+  // Part 1 — current values
+  setText('tas-panel-social', fmt(social));
+  setText('tas-panel-trade',  fmt(trade));
+  setText('tas-panel-total',  fmt(total));
+
+  const updEl = $('tas-updated-at');
+  if (updEl) updEl.textContent = tas.updated_at ? shortTs(tas.updated_at) : '';
+
+  const bigEl = $('tas-total-big');
+  if (bigEl) {
+    bigEl.textContent = total !== null ? fmt(total) : '—';
+    bigEl.className = 'tas-total-big ' + (total === null ? 'clr-error' : total >= 1.5 ? 'clr-ok' : total >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+
+  // Part 2 — history chart
+  renderTasHistory(history, tas);
+
+  // Part 3 — calculation logic
+  // TAS_SOCIAL
+  const calcSocialEl = $('tas-calc-social');
+  if (calcSocialEl) {
+    calcSocialEl.textContent = social !== null ? fmt(social) : '—';
+    calcSocialEl.className = 'mono small ' + (social === null ? 'muted' : social >= 1.5 ? 'clr-ok' : social >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+  const alignScore     = numericOrNull(tas.align_score);
+  const communityScore = numericOrNull(tas.community_score);
+  const alignEl = $('tas-align-score');
+  if (alignEl) {
+    alignEl.textContent = alignScore !== null ? fmt(alignScore) : '—';
+    alignEl.className = alignScore !== null ? 'mono clr-ok' : 'mono muted';
+  }
+  const commEl = $('tas-community-score');
+  if (commEl) {
+    commEl.textContent = communityScore !== null ? fmt(communityScore) : '—';
+    commEl.className = communityScore !== null ? 'mono clr-ok' : 'mono muted';
+  }
+
+  // TAS_TRADE
+  const calcTradeEl = $('tas-calc-trade');
+  if (calcTradeEl) {
+    calcTradeEl.textContent = trade !== null ? fmt(trade) : '—';
+    calcTradeEl.className = 'mono small ' + (trade === null ? 'muted' : trade >= 1.5 ? 'clr-ok' : trade >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+  const baseVal      = numericOrNull(tradeD.base_value);
+  const claimHist    = numericOrNull(tradeD.claim_history_score);
+  const holdingScore = numericOrNull(tradeD.holding_trend_score) ?? numericOrNull(tradeD.holding_trend);
+  setText('tas-base-value',    baseVal   !== null ? fmt(baseVal)   : '—');
+  setText('tas-claim-history', claimHist !== null ? fmt(claimHist) : '—');
+  setText('tas-holding-trend', holdingScore !== null ? fmt(holdingScore) : '—');
+
+  // TAS_TOTAL formula
+  const calcTotalEl = $('tas-calc-total');
+  if (calcTotalEl) {
+    calcTotalEl.textContent = total !== null ? fmt(total) : '—';
+    calcTotalEl.className = 'mono small ' + (total === null ? 'muted' : total >= 1.5 ? 'clr-ok' : total >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+  setText('tas-formula-social', social !== null ? fmt(social) : '—');
+  setText('tas-formula-trade',  trade  !== null ? fmt(trade)  : '—');
+  const formulaTotalEl = $('tas-formula-total');
+  if (formulaTotalEl) {
+    formulaTotalEl.textContent = total !== null ? fmt(total) : '—';
+    formulaTotalEl.className = 'mono bold ' + (total === null ? 'muted' : total >= 1.5 ? 'clr-ok' : total >= 0.8 ? 'clr-warn' : 'clr-error');
+  }
+}
+
 // ── Main Panel ──
 function renderMain(main) {
   const ip  = main.input_packet   || {};
@@ -545,11 +635,6 @@ function renderMain(main) {
 
   const mode = sum.mode || dec.mode || '—';
   setBadge('main-mode-badge', mode, mode.toLowerCase().replace(/[^a-z-]/g, ''));
-
-  setText('main-tas-social', fmt(tas.tas_social));
-  setText('main-tas-trade',  fmt(tas.tas_trade));
-  setText('main-tas-total',  fmt(tas.tas_total));
-  renderTasHistory(main.tas_history || [], tas);
 
   const decText = [
     dec.social_decision ? `${t('decision-social')}: ${dec.social_decision}` : null,
