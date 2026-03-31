@@ -488,34 +488,48 @@ function sparklineSvg(values, color) {
   return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><line x1="${padX}" y1="${height-padY}" x2="${width-padX}" y2="${height-padY}" stroke="rgba(255,255,255,0.08)" stroke-width="1" /><polyline fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />${dots}</svg>`;
 }
 
-function renderTasHistory(history, tas) {
-  const el = $('tas-history');
+function _renderTasMiniCard(elId, label, color, values, latest, firstTs, lastTs) {
+  const el = $(elId);
   if (!el) return;
-  const points = Array.isArray(history) ? history : [];
-  if (!points.length) {
+  if (!values.length) {
     el.innerHTML = `<div class="muted small">${t('no-tas-history')}</div>`;
     return;
   }
+  el.innerHTML = `
+    <div class="tas-mini-card">
+      <div class="tas-mini-head">
+        <span class="tas-mini-label">${escHtml(label)}</span>
+        <span class="tas-mini-value" style="color:${color}">${latest !== null && latest !== undefined ? escHtml(fmt(latest)) : '—'}</span>
+      </div>
+      ${sparklineSvg(values, color)}
+      <div class="tas-mini-axis"><span>${escHtml(firstTs)}</span><span>${escHtml(lastTs)}</span></div>
+    </div>`;
+}
+
+function renderTasHistory(history, tas) {
+  const points = Array.isArray(history) ? history : [];
+  const firstTs = points[0]?.ts ? shortTs(points[0].ts) : '—';
+  const lastTs  = points[points.length - 1]?.ts ? shortTs(points[points.length - 1].ts) : '—';
+
   const metrics = [
-    { key: 'tas_social', label: 'TAS_social', color: '#58a6ff' },
-    { key: 'tas_trade',  label: 'TAS_trade',  color: '#f0a500' },
-    { key: 'tas_total',  label: 'TAS_total',  color: '#00d26a' },
+    { key: 'tas_social', elId: 'tas-history-social', label: 'TAS_social', color: '#58a6ff' },
+    { key: 'tas_trade',  elId: 'tas-history-trade',  label: 'TAS_trade',  color: '#f0a500' },
+    { key: 'tas_total',  elId: 'tas-history-total',  label: 'TAS_total',  color: '#00d26a' },
   ];
-  el.innerHTML = metrics.map(m => {
+
+  if (!points.length) {
+    metrics.forEach(m => {
+      const el = $(m.elId);
+      if (el) el.innerHTML = `<div class="muted small">${t('no-tas-history')}</div>`;
+    });
+    return;
+  }
+
+  metrics.forEach(m => {
     const values = points.map(p => p[m.key]);
     const latest = numericOrNull(tas[m.key]) ?? [...values].reverse().map(numericOrNull).find(v => v !== null);
-    const firstTs = points[0]?.ts ? shortTs(points[0].ts) : '—';
-    const lastTs = points[points.length - 1]?.ts ? shortTs(points[points.length - 1].ts) : '—';
-    return `
-      <div class="tas-mini-card">
-        <div class="tas-mini-head">
-          <span class="tas-mini-label">${escHtml(m.label)}</span>
-          <span class="tas-mini-value" style="color:${m.color}">${latest !== undefined && latest !== null ? escHtml(fmt(latest)) : '—'}</span>
-        </div>
-        ${sparklineSvg(values, m.color)}
-        <div class="tas-mini-axis"><span>${escHtml(firstTs)}</span><span>${escHtml(lastTs)}</span></div>
-      </div>`;
-  }).join('');
+    _renderTasMiniCard(m.elId, m.label, m.color, values, latest, firstTs, lastTs);
+  });
 }
 
 function renderSocialActionsList(elId, actions) {

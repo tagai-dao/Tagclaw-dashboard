@@ -938,11 +938,34 @@ html, body {
 
 .tas-panel-body {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(280px, 2fr) minmax(360px, 3fr);
+  grid-template-columns: minmax(200px, 1.2fr) minmax(260px, 1.8fr) minmax(360px, 3fr);
   gap: 1rem;
   align-items: flex-start;
 }
 
+/* Left: Current Values stacked above TAS_total chart */
+.tas-panel-left {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+/* Right charts column: TAS_social top, TAS_trade bottom */
+.tas-panel-right {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.tas-mini-wrap {
+  /* wrapper for TAS_total chart below Current Values */
+}
+
+.tas-mini-single {
+  /* individual sparkline slot */
+}
+
+/* legacy col — kept for calc col */
 .tas-panel-col {
   display: flex;
   flex-direction: column;
@@ -1018,5 +1041,9 @@ html, body {
 @media (max-width: 900px) {
   .tas-panel-body {
     grid-template-columns: 1fr;
+  }
+  .tas-panel-left,
+  .tas-panel-right {
+    width: 100%;
   }
 }

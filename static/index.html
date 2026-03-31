@@ -50,25 +50,36 @@
     <h2 class="card-title" data-i18n="panel-tas">TAS Components</h2>
     <div class="tas-panel-body">
 
-      <!-- Part 1: Current Values -->
-      <div class="tas-panel-col">
-        <div class="section-label" data-i18n="section-tas-values">Current Values</div>
-        <div class="tas-total-display">
-          <span class="muted small" data-i18n="label-tas-total">TAS Total</span>
-          <span id="tas-total-big" class="tas-total-big clr-ok">—</span>
+      <!-- Part 1 + 2: Left column = Current Values + TAS_total chart stacked -->
+      <div class="tas-panel-left">
+
+        <!-- Part 1: Current Values -->
+        <div>
+          <div class="section-label" data-i18n="section-tas-values">Current Values</div>
+          <div class="tas-total-display">
+            <span class="muted small" data-i18n="label-tas-total">TAS Total</span>
+            <span id="tas-total-big" class="tas-total-big clr-ok">—</span>
+          </div>
+          <div class="row compact" style="margin-top:.5rem">
+            <div class="kv"><span class="k">TAS_social</span><span class="v mono" id="tas-panel-social">—</span></div>
+            <div class="kv"><span class="k">TAS_trade</span><span class="v mono" id="tas-panel-trade">—</span></div>
+            <div class="kv"><span class="k">TAS_total</span><span class="v mono bold" id="tas-panel-total">—</span></div>
+          </div>
+          <div class="muted small" id="tas-updated-at"></div>
         </div>
-        <div class="row compact" style="margin-top:.5rem">
-          <div class="kv"><span class="k">TAS_social</span><span class="v mono" id="tas-panel-social">—</span></div>
-          <div class="kv"><span class="k">TAS_trade</span><span class="v mono" id="tas-panel-trade">—</span></div>
-          <div class="kv"><span class="k">TAS_total</span><span class="v mono bold" id="tas-panel-total">—</span></div>
+
+        <!-- TAS_total sparkline (below Current Values) -->
+        <div class="tas-mini-wrap">
+          <div id="tas-history-total" class="tas-mini-single"></div>
         </div>
-        <div class="muted small" id="tas-updated-at"></div>
+
       </div>
 
-      <!-- Part 2: Recent Cycles (history chart) -->
-      <div class="tas-panel-col">
-        <div class="section-label" data-i18n="recent-cycles">Recent cycles</div>
-        <div id="tas-history" class="tas-history-grid"></div>
+      <!-- Part 2: Right column = TAS_social (top) + TAS_trade (bottom) sparklines -->
+      <div class="tas-panel-right">
+        <div class="section-label" data-i18n="recent-cycles">Recent Cycles</div>
+        <div id="tas-history-social" class="tas-mini-single"></div>
+        <div id="tas-history-trade" class="tas-mini-single" style="margin-top:.6rem"></div>
       </div>
 
       <!-- Part 3: Calculation Logic Visualization -->
