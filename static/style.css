@@ -938,31 +938,43 @@ html, body {
 
 .tas-panel-body {
   display: grid;
-  grid-template-columns: minmax(200px, 1.2fr) minmax(260px, 1.8fr) minmax(360px, 3fr);
+  grid-template-columns: minmax(160px, 1fr) minmax(580px, 2.6fr) minmax(360px, 3fr);
   gap: 1rem;
   align-items: flex-start;
 }
 
-/* Left: Current Values stacked above TAS_total chart */
+/* Left: Current Values only */
 .tas-panel-left {
   display: flex;
   flex-direction: column;
-  gap: .75rem;
+  gap: .5rem;
 }
 
-/* Right charts column: TAS_social top, TAS_trade bottom */
+/* Right: contains the 3-chart grid + label */
 .tas-panel-right {
   display: flex;
   flex-direction: column;
-  gap: .25rem;
+  gap: .4rem;
+}
+
+/* 2-column chart grid: social | total (top row), trade | — (bottom row) */
+.tas-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  gap: .5rem;
+}
+/* trade spans full width on bottom row */
+.tas-charts-grid > #tas-history-trade {
+  grid-column: 1 / 2;
 }
 
 .tas-mini-wrap {
-  /* wrapper for TAS_total chart below Current Values */
+  /* kept for compat */
 }
 
 .tas-mini-single {
-  /* individual sparkline slot */
+  min-width: 0;
 }
 
 /* legacy col — kept for calc col */
@@ -1029,21 +1041,35 @@ html, body {
   margin-top: .1rem;
 }
 
-@media (max-width: 1300px) {
+@media (max-width: 1400px) {
+  .tas-panel-body {
+    grid-template-columns: minmax(150px, 1fr) minmax(500px, 2.2fr) minmax(300px, 2.5fr);
+  }
+}
+
+@media (max-width: 1100px) {
   .tas-panel-body {
     grid-template-columns: 1fr 1fr;
   }
   .tas-calc-col {
     grid-column: 1 / -1;
   }
+  .tas-charts-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .tas-charts-grid > #tas-history-trade {
+    grid-column: auto;
+  }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 750px) {
   .tas-panel-body {
     grid-template-columns: 1fr;
   }
-  .tas-panel-left,
-  .tas-panel-right {
-    width: 100%;
+  .tas-charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .tas-charts-grid > #tas-history-trade {
+    grid-column: auto;
   }
 }

@@ -468,27 +468,79 @@ function numericOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function sparklineSvg(values, color) {
-  const width = 220;
-  const height = 70;
-  const padX = 10;
-  const padY = 10;
+function sparklineSvg(values, color, timestamps) {
+  const width  = 280;
+  const height = 90;
+  const padL   = 38;   // left padding for Y-axis labels
+  const padR   = 8;
+  const padT   = 8;
+  const padB   = 22;   // bottom padding for X-axis labels
+
+  const chartW = width  - padL - padR;
+  const chartH = height - padT - padB;
+
   const valid = values.map((v, i) => ({ v: numericOrNull(v), i })).filter(p => p.v !== null);
   if (!valid.length) {
-    return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="10">${t('no-tas-history')}</text></svg>`;
+    return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="9">${t('no-tas-history')}</text></svg>`;
   }
-  const min = Math.min(...valid.map(p => p.v));
-  const max = Math.max(...valid.map(p => p.v));
-  const span = Math.max(max - min, 0.0001);
-  const count = Math.max(values.length - 1, 1);
-  const toX = i => padX + (i / count) * (width - padX * 2);
-  const toY = v => height - padY - ((v - min) / span) * (height - padY * 2);
-  const pts = valid.map(p => `${toX(p.i)},${toY(p.v)}`);
-  const dots = valid.map(p => `<circle cx="${toX(p.i)}" cy="${toY(p.v)}" r="2.3" fill="${color}" />`).join('');
-  return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline"><line x1="${padX}" y1="${height-padY}" x2="${width-padX}" y2="${height-padY}" stroke="rgba(255,255,255,0.08)" stroke-width="1" /><polyline fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />${dots}</svg>`;
+
+  const rawMin = Math.min(...valid.map(p => p.v));
+  const rawMax = Math.max(...valid.map(p => p.v));
+  const span   = Math.max(rawMax - rawMin, 0.01);
+
+  // Nice Y-axis bounds: round out to neat values
+  const yStep  = span <= 0.5 ? 0.1 : span <= 2 ? 0.5 : 1;
+  const yMin   = Math.floor(rawMin / yStep) * yStep;
+  const yMax   = Math.ceil(rawMax  / yStep) * yStep;
+  const ySpan  = Math.max(yMax - yMin, yStep);
+
+  const count  = Math.max(values.length - 1, 1);
+  const toX    = i => padL + (i / count) * chartW;
+  const toY    = v => padT + chartH - ((v - yMin) / ySpan) * chartH;
+
+  // Polyline
+  const pts  = valid.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
+  const dots = valid.map(p =>
+    `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2.2" fill="${color}" opacity="0.85"/>`
+  ).join('');
+
+  // Y-axis grid + labels (3-4 ticks)
+  const yTicks = [];
+  for (let y = yMin; y <= yMax + yStep * 0.01; y = Math.round((y + yStep) * 1000) / 1000) {
+    const cy = toY(y).toFixed(1);
+    const lbl = y % 1 === 0 ? y.toFixed(0) : y.toFixed(1);
+    yTicks.push(`<line x1="${padL}" y1="${cy}" x2="${padL + chartW}" y2="${cy}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`);
+    yTicks.push(`<text x="${(padL - 3).toFixed(0)}" y="${cy}" dy="3.5" text-anchor="end" font-size="8" fill="rgba(255,255,255,0.35)">${lbl}</text>`);
+  }
+
+  // X-axis ticks: show day labels when timestamps available, else index-based
+  const xTicks = [];
+  const ts = Array.isArray(timestamps) ? timestamps : [];
+  const seenDays = new Set();
+  values.forEach((_, i) => {
+    // Show tick every ~4 points, or when day changes
+    const tsStr = ts[i] || '';
+    const day   = tsStr ? tsStr.slice(5, 10) : '';  // MM-DD
+    const shouldLabel = day && !seenDays.has(day);
+    if (shouldLabel) seenDays.add(day);
+    const cx = toX(i).toFixed(1);
+    const baseY = (padT + chartH + 2).toFixed(1);
+    if (shouldLabel || (!ts.length && i % Math.max(1, Math.floor(values.length / 4)) === 0)) {
+      const lbl = day || String(i);
+      xTicks.push(`<line x1="${cx}" y1="${(padT + chartH).toFixed(1)}" x2="${cx}" y2="${(padT + chartH + 3).toFixed(1)}" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>`);
+      xTicks.push(`<text x="${cx}" y="${(parseFloat(baseY) + 9).toFixed(1)}" text-anchor="middle" font-size="7.5" fill="rgba(255,255,255,0.35)">${lbl}</text>`);
+    }
+  });
+
+  // Y-axis line
+  const yAxisLine = `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + chartH}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>`;
+  // X-axis baseline
+  const xAxisLine = `<line x1="${padL}" y1="${(padT + chartH).toFixed(1)}" x2="${(padL + chartW).toFixed(1)}" y2="${(padT + chartH).toFixed(1)}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>`;
+
+  return `<svg viewBox="0 0 ${width} ${height}" class="tas-sparkline">${yTicks.join('')}${xTicks.join('')}${yAxisLine}${xAxisLine}<polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}"/>${dots}</svg>`;
 }
 
-function _renderTasMiniCard(elId, label, color, values, latest, firstTs, lastTs) {
+function _renderTasMiniCard(elId, label, color, values, latest, timestamps) {
   const el = $(elId);
   if (!el) return;
   if (!values.length) {
@@ -501,15 +553,13 @@ function _renderTasMiniCard(elId, label, color, values, latest, firstTs, lastTs)
         <span class="tas-mini-label">${escHtml(label)}</span>
         <span class="tas-mini-value" style="color:${color}">${latest !== null && latest !== undefined ? escHtml(fmt(latest)) : '—'}</span>
       </div>
-      ${sparklineSvg(values, color)}
-      <div class="tas-mini-axis"><span>${escHtml(firstTs)}</span><span>${escHtml(lastTs)}</span></div>
+      ${sparklineSvg(values, color, timestamps)}
     </div>`;
 }
 
 function renderTasHistory(history, tas) {
   const points = Array.isArray(history) ? history : [];
-  const firstTs = points[0]?.ts ? shortTs(points[0].ts) : '—';
-  const lastTs  = points[points.length - 1]?.ts ? shortTs(points[points.length - 1].ts) : '—';
+  const timestamps = points.map(p => p.ts || '');
 
   const metrics = [
     { key: 'tas_social', elId: 'tas-history-social', label: 'TAS_social', color: '#58a6ff' },
@@ -528,7 +578,7 @@ function renderTasHistory(history, tas) {
   metrics.forEach(m => {
     const values = points.map(p => p[m.key]);
     const latest = numericOrNull(tas[m.key]) ?? [...values].reverse().map(numericOrNull).find(v => v !== null);
-    _renderTasMiniCard(m.elId, m.label, m.color, values, latest, firstTs, lastTs);
+    _renderTasMiniCard(m.elId, m.label, m.color, values, latest, timestamps);
   });
 }
 
