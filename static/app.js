@@ -127,6 +127,7 @@ const I18N = {
     'edge-impl-request': '实现请求',
     'edge-result-json': 'result.json',
     'edge-completion-feedback': '完成反馈',
+    'shared-executor': '共享执行器 — Main 也通过此路径发布',
     'section-dev': '🔨 鲁班 · 开发调度',
     'label-dev-status': '状态',
     'label-dev-task': '任务',
@@ -268,6 +269,7 @@ const I18N = {
     'edge-impl-request': 'implementation request',
     'edge-result-json': 'result.json',
     'edge-completion-feedback': 'completion feedback',
+    'shared-executor': 'Shared executor — Main also publishes via this path',
     'section-dev': '🔨 鲁班 · Dev Dispatch',
     'label-dev-status': 'Status',
     'label-dev-task': 'Task',
@@ -581,54 +583,137 @@ function renderPipeline(elId, pipeline, agent) {
   const el = $(elId);
   if (!el || !pipeline || !pipeline.steps) { if (el) el.innerHTML = '<div class="muted small">—</div>'; return; }
   const steps = pipeline.steps;
-  el.innerHTML = steps.map((step, i) => {
+  const mi = (agent === 'bookmarker' && pipeline.main_influence) ? pipeline.main_influence : null;
+
+  let html = '';
+
+  // Main influence context banner for bookmarker pipeline
+  if (mi) {
+    const decCls = mi.social_decision === 'authorize' ? 'clr-ok' : 'clr-warn';
+    const authIcon = mi.authorized ? '✓' : '✗';
+    const authCls = mi.authorized ? 'clr-ok' : 'clr-warn';
+    html += `<div class="pipeline-main-influence">
+      <div class="mi-header">
+        <span class="mi-label">Main Agent</span>
+        <span class="mi-badge ${decCls}">${escHtml(mi.social_decision)}</span>
+        <span class="mi-badge ${authCls}">intent ${authIcon}</span>
+      </div>
+    </div>`;
+  }
+
+  html += '<div class="pipeline-steps-row">';
+  html += steps.map((step, i) => {
     const arrow = i < steps.length - 1 ? '<div class="pipeline-arrow">→</div>' : '';
     const stCls = 'st-' + (step.status || '').toLowerCase().replace(/[^a-z-]/g, '');
     let detail = '';
+    let miAnnotation = '';
+
     if (agent === 'main' && step.id === 'gate_checks') {
       const checks = step.data || {};
-      detail = Object.entries(checks).map(([k, v]) =>
-        `<div class="gate-item"><span class="${v ? 'gate-pass' : 'gate-fail'}">${v ? '✓' : '✗'}</span> ${escHtml(k)}</div>`
-      ).join('');
+      detail = Object.entries(checks)
+        .filter(([k]) => !k.startsWith('_'))
+        .map(([k, v]) =>
+          `<div class="gate-item"><span class="${v ? 'gate-pass' : 'gate-fail'}">${v ? '✓' : '✗'}</span> ${escHtml(k)}</div>`
+        ).join('');
+      const passCount = checks._pass_count ?? Object.values(checks).filter(Boolean).length;
+      const total = checks._total ?? Object.keys(checks).filter(k => !k.startsWith('_')).length;
+      if (total) detail = `<div class="gate-summary">${passCount}/${total} pass</div>` + detail;
     } else if (agent === 'main' && step.id === 'social_intent') {
       const d = step.data || {};
       detail = `authorized: ${d.authorized ? '✓' : '✗'}`;
       if (d.action_count) detail += ` · ${d.action_count} actions`;
       if (d.reason) detail += `<br>${escHtml(d.reason.slice(0, 80))}`;
-    } else if (agent === 'bookmarker' && step.id === 'autonomy') {
+    } else if (agent === 'main' && step.id === 'cli_wrapper') {
       const d = step.data || {};
-      detail = `mode: ${escHtml(d.mode || '—')}`;
-      if (d.recommended_actions?.length) detail += `<br>→ ${d.recommended_actions.join(', ')}`;
-    } else if (agent === 'bookmarker' && step.id === 'drafts') {
+      detail = `<span class="mono-sm">${escHtml(d.script || 'main_social_action.py')}</span>`;
+      detail += `<br>actor: ${escHtml(d.actor || 'main')} → ${escHtml(d.records_to || 'social-history.json')}`;
+    } else if (agent === 'main' && step.id === 'decision_history') {
+      const d = step.data || {};
+      detail = escHtml(d.social_decision || '—');
+      if (d.main_action_count) detail += ` · ${d.main_action_count} actions`;
+      if (d.reason) detail += `<br><span class="muted">${escHtml(d.reason.slice(0, 80))}</span>`;
+    } else if (agent === 'bookmarker' && step.id === 'x_sync') {
+      const d = step.data || {};
+      detail = `source: ${escHtml(d.source || d.source_class || '—')}`;
+      if (d.updated_at) detail += `<br>${shortTs(d.updated_at)}`;
+    } else if (agent === 'bookmarker' && step.id === 'topic_brief') {
+      const d = step.data || {};
+      const kws = (d.keywords || []).slice(0, 4);
+      detail = kws.length ? kws.map(k => `<span class="tag-xs">${escHtml(k)}</span>`).join(' ') : '—';
+      if (d.urgency) detail += `<br>urgency: ${escHtml(d.urgency)}`;
+    } else if (agent === 'bookmarker' && step.id === 'content_candidates') {
+      const d = step.data || {};
+      detail = `${d.count || 0} candidates`;
+      const types = d.types || {};
+      if (Object.keys(types).length) detail += '<br>' + Object.entries(types).map(([k,v]) => `${escHtml(String(k))}×${v}`).join(' ');
+    } else if (agent === 'bookmarker' && step.id === 'social_drafts') {
       const d = step.data || {};
       detail = `${d.count || 0} drafts`;
       const types = d.types || {};
-      if (Object.keys(types).length) detail += ': ' + Object.entries(types).map(([k,v]) => `${k}×${v}`).join(' ');
+      if (Object.keys(types).length) detail += ': ' + Object.entries(types).map(([k,v]) => `${escHtml(String(k))}×${v}`).join(' ');
+      if (d.x_items_seen) detail += `<br>seen: ${d.x_items_seen}`;
+    } else if (agent === 'bookmarker' && step.id === 'autonomy_intent') {
+      const d = step.data || {};
+      detail = `mode: ${escHtml(d.mode || '—')}`;
+      if (d.recommended_actions?.length) detail += `<br>→ ${escHtml(d.recommended_actions.join(', '))}`;
+      // Show TAS/OP context
+      if (d.tas_social != null || d.op != null) {
+        const thr = d.thresholds || {};
+        const tasVal = (typeof d.tas_social === 'number') ? d.tas_social.toFixed(2) : '—';
+        const opVal = (typeof d.op === 'number') ? Math.round(d.op) : '—';
+        detail += `<br><span class="threshold-row">TAS=${tasVal} OP=${opVal}</span>`;
+      }
+      // Main guidance annotation
+      if (mi) {
+        const g = mi.guidance || {};
+        const parts = [g.action_emphasis, g.signal_priority, g.experiment_mode].filter(Boolean);
+        if (parts.length) {
+          miAnnotation = `<div class="mi-annotation"><span class="mi-arrow-in">⤹</span> main_guidance: ${escHtml(parts.join(', '))}</div>`;
+        } else {
+          miAnnotation = `<div class="mi-annotation"><span class="mi-arrow-in">⤹</span> main_guidance</div>`;
+        }
+      }
     } else if (agent === 'bookmarker' && step.id === 'execution') {
       const d = step.data || {};
       const parts = [];
       if (d.attempted) parts.push(`${d.succeeded}/${d.attempted} ok`);
       if (d.failed) parts.push(`${d.failed} fail`);
-      if (d.noop) parts.push(`${d.noop} noop`);
+      if (d.noop != null) parts.push(`${d.noop} noop`);
       detail = parts.join(' · ') || '—';
+      // Breaker status inline
+      const brkState = d.breaker_state || '—';
+      const brkCls = brkState === 'open' ? 'clr-error' : 'clr-ok';
+      detail += `<br>breaker: <span class="${brkCls}">${escHtml(brkState)}</span>`;
+      if (d.breaker_consecutive) detail += ` (${d.breaker_consecutive}×)`;
+      if (d.filtered_types?.length) detail += `<br>filtered: ${escHtml(d.filtered_types.join(', '))}`;
       if (d.executed_at) detail += `<br>${shortTs(d.executed_at)}`;
+      // Shared executor annotation
+      if (mi) {
+        miAnnotation = `<div class="mi-annotation"><span class="mi-arrow-in">⤹</span> ${t('shared-executor')}</div>`;
+      }
     } else if (step.id === 'breaker') {
+      // Legacy fallback for old schema
       const d = step.data || {};
       detail = d.state || '—';
       if (d.consecutive_failures) detail += ` · ${d.consecutive_failures} consecutive`;
       if (d.until) detail += `<br>until ${shortTs(d.until)}`;
     } else if (step.id === 'decision') {
+      // Legacy fallback for old schema
       detail = step.data?.social_decision || '—';
     }
     return `<div class="pipeline-step">
-      <div class="pipeline-step-card">
+      <div class="pipeline-step-card${miAnnotation ? ' has-mi' : ''}">
         <div class="step-label">${escHtml(step.label)}</div>
         <div class="step-badge ${stCls}">${escHtml(step.status || '—')}</div>
         <div class="step-detail">${detail}</div>
+        ${miAnnotation}
       </div>
       ${arrow}
     </div>`;
   }).join('');
+  html += '</div>';
+
+  el.innerHTML = html;
 }
 
 // ── X Section Toggle ──
