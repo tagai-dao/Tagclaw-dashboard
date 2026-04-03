@@ -96,48 +96,78 @@ def _to_float(v: Any) -> float | None:
         return None
 
 
-def _load_tas_history(limit: int = 20) -> list[dict[str, Any]]:
-    path = WORKSPACE / "memory" / "results.tsv"
-    if not path.exists():
-        return []
-
+def _load_tas_history(limit: int = 50) -> list[dict[str, Any]]:
     points: list[dict[str, Any]] = []
-    try:
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            if not raw.strip():
-                continue
-            parts = raw.split("\t")
 
-            # Legacy schema: cycle_id, ts, tas_total, tas_social, tas_economic, tas_trade, ...
-            if len(parts) >= 6 and parts[1].startswith("20"):
-                points.append({
-                    "ts": parts[1],
-                    "tas_total": _to_float(parts[2]),
-                    "tas_social": _to_float(parts[3]),
-                    "tas_trade": _to_float(parts[5]),
-                })
-                continue
+    # Source 1: canonical JSONL (dense, per-cycle) — preferred
+    jsonl_path = WORKSPACE / "runtime" / "shared" / "tas-history.jsonl"
+    if jsonl_path.exists():
+        try:
+            for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if obj.get("ts"):
+                        points.append({
+                            "ts": obj["ts"],
+                            "tas_total": _to_float(obj.get("tas_total")),
+                            "tas_social": _to_float(obj.get("tas_social")),
+                            "tas_trade": _to_float(obj.get("tas_trade")),
+                        })
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
-            # Mid schema: ts, OP, VP, TAS_social, TAS_trade, TAS_total, mode, desc
-            if len(parts) >= 6 and parts[0].startswith("20") and _to_float(parts[1]) is not None and _to_float(parts[5]) is not None:
-                points.append({
-                    "ts": parts[0],
-                    "tas_total": _to_float(parts[5]),
-                    "tas_social": _to_float(parts[3]),
-                    "tas_trade": _to_float(parts[4]),
-                })
-                continue
+    # Source 2: legacy results.tsv fallback (sparse) — only if JSONL is empty
+    if not points:
+        tsv_path = WORKSPACE / "memory" / "results.tsv"
+        if tsv_path.exists():
+            try:
+                for raw in tsv_path.read_text(encoding="utf-8").splitlines():
+                    if not raw.strip():
+                        continue
+                    parts = raw.split("\t")
 
-            # Newer lightweight schema: ts, main, heartbeat, TAS=1.292, OP=..., VP=...
-            if len(parts) >= 4 and parts[0].startswith("20") and parts[3].startswith("TAS="):
-                points.append({
-                    "ts": parts[0],
-                    "tas_total": _to_float(parts[3].split("=", 1)[1]),
-                    "tas_social": None,
-                    "tas_trade": None,
-                })
-    except Exception:
-        return []
+                    # Legacy schema: epoch, timestamp, TAS, TAS_social, TAS_economic, TAS_trade, ...
+                    if len(parts) >= 6 and parts[1].startswith("20"):
+                        points.append({
+                            "ts": parts[1],
+                            "tas_total": _to_float(parts[2]),
+                            "tas_social": _to_float(parts[3]),
+                            "tas_trade": _to_float(parts[5]),
+                        })
+                        continue
+
+                    # Mid schema: ts, OP, VP, TAS_social, TAS_trade, TAS_total, mode, desc
+                    if len(parts) >= 6 and parts[0].startswith("20") and _to_float(parts[1]) is not None and _to_float(parts[5]) is not None:
+                        points.append({
+                            "ts": parts[0],
+                            "tas_total": _to_float(parts[5]),
+                            "tas_social": _to_float(parts[3]),
+                            "tas_trade": _to_float(parts[4]),
+                        })
+                        continue
+
+                    # Lightweight schema: ts, main, heartbeat, TAS=1.292, ...
+                    if len(parts) >= 4 and parts[0].startswith("20") and parts[3].startswith("TAS="):
+                        points.append({
+                            "ts": parts[0],
+                            "tas_total": _to_float(parts[3].split("=", 1)[1]),
+                            "tas_social": None,
+                            "tas_trade": None,
+                        })
+            except Exception:
+                pass
+
+    # Deduplicate by ts (last wins), sort chronologically
+    seen: dict[str, dict[str, Any]] = {}
+    for p in points:
+        if p.get("ts"):
+            seen[p["ts"]] = p
+    points = sorted(seen.values(), key=lambda x: x["ts"])
 
     return points[-limit:]
 
@@ -757,12 +787,16 @@ def api_status():
     input_pkt    = _safe("main/input-packet.json")   or {}
     tas_latest   = _safe("main/tas-latest.json")     or {}
     last_dec     = _safe("main/last-decision.json")  or {}
+    strategy_plan = _safe("main/strategy-plan.json") or {}
     social_int   = _safe("main/social-intent.json")  or {}
+    budget_alloc = _safe("shared/budget-allocation.json") or {}
+    attribution  = _safe("shared/latest-attribution.json") or {}
 
     # ── Bookmarker ──
     topic_brief  = _safe("bookmarker/topic-brief.json")         or {}
     src_health   = _safe("bookmarker/source-health.json")       or {}
     bm_cands     = _safe("bookmarker/content-candidates.json")  or {}
+    bm_topic_perf = _safe("bookmarker/topic-performance.json")  or {}
     auto_intent  = _safe("bookmarker/autonomy-intent.json")     or {}
     social_hist  = _safe("shared/social-history.json")          or {}
     social_split = _split_social_actions(social_hist.get("items") or [])
@@ -776,10 +810,16 @@ def api_status():
     tas_trd  = _safe("trader/tas-trade.json")       or {}
     risk     = _safe("trader/risk-status.json")     or {}
     onchain  = _safe("trader/onchain-positions.json") or {}
+    portfolio_baseline = _safe("trader/portfolio-baseline.json") or {}
+    portfolio_delta = _safe("trader/portfolio-delta.json") or {}
+    measurement_quality = _safe("trader/measurement-quality.json") or {}
 
     # ── Claude Dispatch / Dev ──
     dev_status = _safe("dev/status.json") or {}
     dev_result = _safe("dev/result.json") or {}
+    dev_stage  = _safe("dev/stage-status.json") or {}
+    dev_backlog = _safe("dev/backlog.json") or {}
+    dev_roi = _safe("dev/dispatch-roi.json") or {}
 
     # strip private key fields defensively
     if "private_key" in wallet:
@@ -787,25 +827,7 @@ def api_status():
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    tas_history = _load_tas_history(limit=20)
-    current_ts = tas_latest.get("updated_at")
-    if current_ts:
-        current_point = {
-            "ts": current_ts,
-            "tas_total": _to_float(tas_latest.get("tas_total")),
-            "tas_social": _to_float(tas_latest.get("tas_social")),
-            "tas_trade": _to_float(tas_latest.get("tas_trade")),
-        }
-        if tas_history and tas_history[-1].get("ts") == current_ts:
-            tas_history[-1] = {
-                "ts": current_ts,
-                "tas_total": current_point["tas_total"] if current_point["tas_total"] is not None else tas_history[-1].get("tas_total"),
-                "tas_social": current_point["tas_social"] if current_point["tas_social"] is not None else tas_history[-1].get("tas_social"),
-                "tas_trade": current_point["tas_trade"] if current_point["tas_trade"] is not None else tas_history[-1].get("tas_trade"),
-            }
-        else:
-            tas_history.append(current_point)
-        tas_history = tas_history[-20:]
+    tas_history = _load_tas_history(limit=50)
 
     return JSONResponse({
         "fetched_at": now_utc,
@@ -816,6 +838,9 @@ def api_status():
             "tas_latest":     tas_latest,
             "tas_history":    tas_history,
             "last_decision":  last_dec,
+            "strategy_plan":  strategy_plan,
+            "budget_allocation": budget_alloc,
+            "latest_attribution": attribution,
             "social_intent":  social_int,
             "social_actions": list(reversed((social_split.get("main") or [])[-20:])),
             "social_pipeline": _build_main_social_pipeline(social_int, last_dec, social_split.get("main") or []),
@@ -824,6 +849,7 @@ def api_status():
             "topic_brief":          topic_brief,
             "source_health":        src_health,
             "content_candidates":   bm_cands,
+            "topic_performance":    bm_topic_perf,
             "autonomy_intent":      auto_intent,
             "social_drafts":        social_drafts,
             "social_actions":       list(reversed((social_split.get("bookmarker") or [])[-20:])),
@@ -847,11 +873,17 @@ def api_status():
             "tas_trade":         tas_trd,
             "risk_status":       risk,
             "onchain_positions": onchain,
+            "portfolio_baseline": portfolio_baseline,
+            "portfolio_delta": portfolio_delta,
+            "measurement_quality": measurement_quality,
             "trade_actions":     _load_trade_actions(limit=20),
         },
         "dev_dispatch": {
             "status": dev_status,
             "result": dev_result,
+            "stage_status": dev_stage,
+            "backlog": dev_backlog,
+            "dispatch_roi": dev_roi,
         },
     })
 
