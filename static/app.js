@@ -75,6 +75,7 @@ const I18N = {
     'no-dev-result': '暂无鲁班交付结果',
     'no-data': '无数据',
     'no-tas-history': '暂无 TAS 历史',
+    'tas-accumulating': '数据积累中',
     'no-actions': '无动作',
     'candidates-unit': '个候选',
     'no-candidates': '无候选',
@@ -224,6 +225,7 @@ const I18N = {
     'no-dev-result': 'No Luban deliverable yet',
     'no-data': 'No data',
     'no-tas-history': 'No TAS history available',
+    'tas-accumulating': 'Accumulating data',
     'no-actions': 'No actions',
     'candidates-unit': 'candidate(s)',
     'no-candidates': 'No candidates',
@@ -554,8 +556,8 @@ function renderTasHistory(history, tas) {
     if (!p.ts) return false;
     try { return new Date(p.ts).getTime() >= cutoffMs; } catch { return false; }
   });
-  // Fallback: if < 3 points in 72h, show last 8 points from full history
-  if (points.length < 3) points = allPoints.slice(-8);
+  // Fallback: if < 5 points in 72h, show last 10 points from full history
+  if (points.length < 5) points = allPoints.slice(-10);
 
   const metrics = [
     { key: 'tas_social', elId: 'tas-history-social', label: 'TAS_social', color: '#58a6ff' },
@@ -567,6 +569,15 @@ function renderTasHistory(history, tas) {
     metrics.forEach(m => {
       const el = $(m.elId);
       if (el) el.innerHTML = `<div class="muted small">${t('no-tas-history')}</div>`;
+    });
+    return;
+  }
+
+  // Show "accumulating" prompt when not enough data points to draw a meaningful chart
+  if (points.length < 5) {
+    metrics.forEach(m => {
+      const el = $(m.elId);
+      if (el) el.innerHTML = `<div class="muted small">${t('tas-accumulating')} (${points.length} 个点)</div>`;
     });
     return;
   }
