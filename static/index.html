@@ -324,6 +324,31 @@
     <div id="dev-result-links" class="list-block">—</div>
   </section>
 
+  <!-- ── Wiki System ── -->
+  <section class="card" id="wiki-panel">
+    <h2 class="card-title" data-i18n="panel-wiki">Wiki System</h2>
+
+    <div class="section-label">Execution Brief</div>
+    <div id="wiki-exec-brief" class="list-block">—</div>
+
+    <div class="section-label">Top Themes</div>
+    <div id="wiki-top-themes" class="list-block">—</div>
+
+    <div class="x-section-header" onclick="toggleSection('wiki-pipeline')">
+      <span class="section-label">Ingest Pipeline</span>
+      <button id="wiki-pipeline-toggle" class="x-toggle-btn">&#9650;</button>
+    </div>
+    <div id="wiki-pipeline-collapsible" class="x-collapsible open">
+      <div id="wiki-pipeline-table" class="list-block">—</div>
+    </div>
+
+    <div class="section-label">Agent Wiki Status</div>
+    <div id="wiki-agent-status" class="wiki-agent-grid">—</div>
+
+    <div class="section-label">Lint Health</div>
+    <div id="wiki-lint-summary" class="row compact">—</div>
+  </section>
+
 </main>
 
 <!-- ═══════════════════════════════════════════ LOWER PANELS ══ -->
