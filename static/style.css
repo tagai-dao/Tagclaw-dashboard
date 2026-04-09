@@ -465,46 +465,28 @@ html, body {
 .src-bookmarker { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
 .src-main       { background: rgba(0, 210, 106, 0.15); color: #00d26a; }
 
-/* ── Data Collection Module ── */
-.data-collection-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-  padding: 12px 0;
-}
-.dc-card { padding: 14px 16px; }
-.dc-card-wide { grid-column: span 2; }
-.dc-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.dc-icon { font-size: 1.1em; }
-.dc-title { font-size: 0.78em; font-weight: 600; color: var(--muted); flex: 1; }
-.dc-status-pill {
-  font-size: 0.65em;
-  padding: 2px 7px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.1);
-  color: var(--muted);
-}
-.dc-status-pill.ok { background: rgba(46,160,67,0.25); color: #3fb950; }
-.dc-status-pill.stale { background: rgba(210,153,34,0.25); color: #d29922; }
-.dc-status-pill.alert { background: rgba(248,81,73,0.25); color: #f85149; }
-.dc-card-body { display: flex; flex-direction: column; gap: 6px; }
-.dc-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.dc-label { font-size: 0.72em; color: var(--muted); white-space: nowrap; }
-.dc-value { font-size: 0.82em; font-weight: 500; color: var(--text); text-align: right; }
-.dc-trending-list { display: flex; flex-wrap: wrap; gap: 6px; }
-.dc-tag {
-  font-size: 0.72em;
-  padding: 3px 9px;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.07);
-  color: var(--muted);
-  border: 1px solid rgba(255,255,255,0.1);
-}
+/* ── self-IP LLM Wiki Module ── */
+.wiki-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.wiki-card { background: var(--card); border-radius: 10px; padding: 16px; border: 1px solid var(--border); }
+.wiki-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.wiki-card-icon { font-size: 1.2em; }
+.wiki-card-title { font-weight: 600; font-size: .95em; }
+.wiki-card-subtitle { font-size: .75em; color: var(--muted); margin-bottom: 10px; }
+.wiki-dir-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(48,54,61,.5); font-size: .82em; }
+.wiki-dir-name { font-weight: 500; }
+.wiki-dir-meta { display: flex; gap: 8px; align-items: center; color: var(--muted); }
+.wiki-dir-tag { font-size: .7em; padding: 1px 6px; border-radius: 9px; background: rgba(88,166,255,.08); border: 1px solid rgba(88,166,255,.15); }
+.wiki-badge { display: inline-block; padding: 2px 8px; border-radius: 9px; font-size: .75em; font-weight: 600; }
+.wiki-badge.ok { background: rgba(0,210,106,.12); color: #4ade80; }
+.wiki-badge.stale { background: rgba(240,165,0,.12); color: #fb923c; }
+.wiki-badge.missing { background: rgba(255,77,77,.12); color: #f87171; }
+.wiki-theme-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.wiki-theme-bar { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.wiki-theme-bar-fill { height: 100%; background: #6366f1; border-radius: 3px; }
+.wiki-tick-pill { display: inline-block; padding: 2px 8px; border-radius: 9px; background: rgba(88,166,255,.08); color: #a5b4fc; font-size: .75em; margin: 2px; }
+.wiki-arch-note { font-size: .75em; color: var(--muted); margin-bottom: 16px; padding: 8px 12px; background: var(--card); border-radius: 6px; border-left: 3px solid #6366f1; }
+.wiki-section-label { font-size: .75em; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
+.wiki-total-badge { margin-left: auto; font-size: .72em; padding: 1px 8px; border-radius: 9px; background: rgba(88,166,255,.08); color: #a5b4fc; }
 
 @media (max-width: 1300px) {
   #lower-panels {
@@ -1053,32 +1035,10 @@ html, body {
 .badge-warn  { border-color: var(--warn); color: var(--warn); background: rgba(240,165,0,.08); }
 .badge-error { border-color: var(--error);color: var(--error);background: rgba(255,77,77,.08); }
 
-/* ── Wiki System Panel ── */
-#wiki-panel {
-  grid-column: 1 / -1;
-}
-
-.wiki-pipeline-row {
-  display: grid;
-  grid-template-columns: 1.2fr 1.8fr .8fr 1.2fr .6fr;
-  gap: .5rem;
-  align-items: center;
-  padding: .3rem .5rem;
-  background: var(--card2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: .75rem;
-}
-
-.wiki-pipeline-row.wiki-pipeline-header {
-  background: transparent;
-  border: none;
-  font-size: .65rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  padding-bottom: 0;
-}
+/* ── Wiki Module (lower panel) ── */
+.wiki-pipeline-table { width: 100%; border-collapse: collapse; font-size: .8em; }
+.wiki-pipeline-table th { text-align: left; padding: 5px 8px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); }
+.wiki-pipeline-table td { padding: 5px 8px; vertical-align: middle; border-bottom: 1px solid rgba(48,54,61,.5); }
 
 .wiki-agent-grid {
   display: grid;
@@ -1087,13 +1047,13 @@ html, body {
 }
 
 .wiki-agent-card {
-  background: var(--card2);
+  background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: .5rem .65rem;
+  border-radius: 8px;
+  padding: .6rem .75rem;
   display: flex;
   flex-direction: column;
-  gap: .25rem;
+  gap: .3rem;
 }
 
 .wiki-agent-card .agent-name {
@@ -1113,37 +1073,7 @@ html, body {
 .wiki-agent-card .kv-row .k { color: var(--muted); }
 .wiki-agent-card .kv-row .v { font-family: var(--mono); }
 
-.wiki-lint-row {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.wiki-lint-metric {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: .1rem;
-}
-
-.wiki-lint-metric .lint-val {
-  font-family: var(--mono);
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.wiki-lint-metric .lint-label {
-  font-size: .62rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: .06em;
-}
-
 @media (max-width: 900px) {
-  .wiki-agent-grid {
-    grid-template-columns: 1fr;
-  }
-  .wiki-pipeline-row {
-    grid-template-columns: 1fr;
-  }
+  .wiki-agent-grid { grid-template-columns: 1fr; }
+  .wiki-grid { grid-template-columns: 1fr; }
 }
