@@ -52,6 +52,166 @@ def _safe(path: str) -> dict | list | None:
     return _load(RUNTIME / path)
 
 
+def _mtime_iso(path: Path) -> str | None:
+    """Return file mtime as ISO string, or None if missing."""
+    try:
+        ts = path.stat().st_mtime
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return None
+
+
+def _newest_mtime_iso(directory: Path) -> str | None:
+    """Return mtime of the newest file in a directory, or None."""
+    try:
+        files = [f for f in directory.iterdir() if f.is_file()]
+        if not files:
+            return None
+        newest = max(files, key=lambda f: f.stat().st_mtime)
+        return _mtime_iso(newest)
+    except Exception:
+        return None
+
+
+def _age_status(date_str: str | None, max_hours: float) -> str:
+    """Return 'ok', 'stale', or 'missing' based on age."""
+    if not date_str:
+        return "missing"
+    try:
+        for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                dt = datetime.strptime(date_str.replace("+00:00", "Z").rstrip("Z") + "Z" if "Z" not in date_str else date_str, fmt)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                break
+            except ValueError:
+                continue
+        else:
+            return "missing"
+        age = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+        return "ok" if age < max_hours else "stale"
+    except Exception:
+        return "missing"
+
+
+def _parse_lint_frontmatter(path: Path) -> dict:
+    """Parse YAML-like frontmatter from lint report."""
+    result = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+        if not text.startswith("---"):
+            return result
+        end = text.index("---", 3)
+        for line in text[3:end].strip().splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                k, v = k.strip(), v.strip()
+                try:
+                    result[k] = int(v)
+                except ValueError:
+                    result[k] = v
+    except Exception:
+        pass
+    return result
+
+
+def _load_wiki_status() -> dict:
+    """Build wiki_system status dict for the dashboard."""
+    wiki_dir = WORKSPACE / "wiki"
+
+    # ── Execution Brief ──
+    brief_data = _load(RUNTIME / "shared" / "wiki-execution-brief.json") or {}
+    compiled_at = brief_data.get("compiled_at")
+    valid_until = brief_data.get("valid_until")
+    top_themes = [
+        {"name": th.get("name", ""), "heat_score": th.get("heat_score", 0), "agent_action": th.get("agent_action", "")}
+        for th in (brief_data.get("top_themes") or [])[:3]
+    ]
+    credit_strategy = brief_data.get("credit_strategy") or {}
+
+    execution_brief = {
+        "compiled_at": compiled_at,
+        "valid_until": valid_until,
+        "top_themes": top_themes,
+        "credit_strategy": credit_strategy,
+    }
+
+    # ── Ingest Pipeline ──
+    # 1. platform_snapshot
+    manifest = _load(wiki_dir / "tagclaw-platform" / "raw" / "manifest.json") or {}
+    ps_last = manifest.get("fetched_at")
+
+    # 2. docs_ingest
+    di_last = _newest_mtime_iso(wiki_dir / "concepts") if (wiki_dir / "concepts").is_dir() else None
+
+    # 3. topic_heatmap
+    heatmap = _load(RUNTIME / "bookmarker" / "topic-heatmap.json") or {}
+    th_last = heatmap.get("generated_at")
+
+    # 4. execution_brief
+    eb_last = compiled_at
+
+    # 5. social_snapshot
+    ss_path = wiki_dir / "social" / "trending.md"
+    ss_last = _mtime_iso(ss_path)
+
+    # 6. lint
+    lint_path = wiki_dir / "lint" / "latest-report.md"
+    lint_last = _mtime_iso(lint_path)
+    lint_fm = _parse_lint_frontmatter(lint_path) if lint_path.exists() else {}
+
+    # 7. query_writebacks
+    qw_last = _newest_mtime_iso(wiki_dir / "queries") if (wiki_dir / "queries").is_dir() else None
+
+    ingest_pipeline = [
+        {"name": "platform_snapshot", "script": "fetch_tagclaw_platform_wiki.py", "freq": "monthly",
+         "output": "wiki/tagclaw-platform/raw/", "last_run": ps_last, "status": _age_status(ps_last, 31 * 24)},
+        {"name": "docs_ingest", "script": "wiki_ingest_docs_monthly_v1.py", "freq": "monthly",
+         "output": "wiki/concepts/", "last_run": di_last, "status": _age_status(di_last, 31 * 24)},
+        {"name": "topic_heatmap", "script": "build_wiki_topic_heatmap_v1.py", "freq": "bookmarker heartbeat",
+         "output": "runtime/bookmarker/topic-heatmap.json", "last_run": th_last, "status": _age_status(th_last, 24)},
+        {"name": "execution_brief", "script": "build_wiki_execution_brief_v1.py", "freq": "weekly",
+         "output": "runtime/shared/wiki-execution-brief.json", "last_run": eb_last, "status": _age_status(eb_last, 7 * 24)},
+        {"name": "social_snapshot", "script": "build_wiki_social_snapshot_v1.py", "freq": "weekly",
+         "output": "wiki/social/trending.md", "last_run": ss_last, "status": _age_status(ss_last, 7 * 24)},
+        {"name": "lint", "script": "wiki_lint_v1.py", "freq": "weekly",
+         "output": "wiki/lint/latest-report.md", "last_run": lint_last,
+         "status": "warn" if lint_fm.get("broken_links_count", 0) > 0 else _age_status(lint_last, 7 * 24)},
+        {"name": "query_writebacks", "script": "write_wiki_query.py", "freq": "per heartbeat",
+         "output": "wiki/queries/", "last_run": qw_last, "status": _age_status(qw_last, 2)},
+    ]
+
+    # ── Agent Wiki Status ──
+    def _wiki_fields(data: dict) -> dict:
+        return {k: v for k, v in data.items() if k.startswith("wiki_")}
+
+    main_latest = _load(RUNTIME / "main" / "latest.json") or {}
+    bm_latest = _load(RUNTIME / "bookmarker" / "latest.json") or {}
+    trader_latest = _load(RUNTIME / "trader" / "latest.json") or {}
+
+    agent_wiki_status = {
+        "main": _wiki_fields(main_latest),
+        "bookmarker": _wiki_fields(bm_latest),
+        "trader": trader_latest.get("wiki") or _wiki_fields(trader_latest),
+    }
+
+    # ── Lint ──
+    lint_info = {
+        "generated_at": lint_fm.get("generated_at"),
+        "concepts_checked": lint_fm.get("concepts_checked", 0),
+        "broken_links_count": lint_fm.get("broken_links_count", 0),
+        "stale_count": lint_fm.get("stale_count", 0),
+        "orphan_count": lint_fm.get("orphan_count", 0),
+    }
+
+    return {
+        "execution_brief": execution_brief,
+        "ingest_pipeline": ingest_pipeline,
+        "agent_wiki_status": agent_wiki_status,
+        "lint": lint_info,
+    }
+
+
 def _classify_social_actor(ev: dict[str, Any]) -> str:
     """Infer which agent authored a social action history item.
 
@@ -885,7 +1045,14 @@ def api_status():
             "backlog": dev_backlog,
             "dispatch_roi": dev_roi,
         },
+        "wiki_system": _load_wiki_status(),
     })
+
+
+@app.get("/api/wiki")
+def api_wiki():
+    """Dedicated Wiki System endpoint."""
+    return JSONResponse({"wiki_system": _load_wiki_status()})
 
 
 @app.get("/api/timeline")

@@ -152,6 +152,7 @@ const I18N = {
     'no-x-data': '暂无数据',
     'section-trade-actions': '交易动作',
     'no-trade-actions': '暂无交易记录',
+    'panel-wiki': 'Wiki 系统',
   },
   en: {
     subtitle: 'Agent Dashboard',
@@ -302,6 +303,7 @@ const I18N = {
     'no-x-data': 'No data',
     'section-trade-actions': 'Trade Actions',
     'no-trade-actions': 'No trade actions',
+    'panel-wiki': 'Wiki System',
   },
 };
 
@@ -461,6 +463,7 @@ function renderStatus(data) {
   renderBookmarker(data.bookmarker || {});
   renderTrader(data.trader || {});
   renderDev(data.dev_dispatch || {});
+  renderWikiPanel(data.wiki_system || {});
   renderDataCollection(data).catch(e => console.warn('renderDataCollection error:', e));
 }
 
@@ -1321,6 +1324,107 @@ function agentState(statusText, updatedAt) {
   if (status.includes('partial') || status.includes('warn')) return 'warn';
   if (status.includes('fail') || status.includes('error') || status.includes('blocked')) return 'error';
   return 'idle';
+}
+
+// ── Wiki System Panel ────────────────────────────────────────────────────
+
+function renderWikiPanel(wiki) {
+  if (!wiki) { return; }
+
+  // Execution Brief
+  const eb = wiki.execution_brief || {};
+  const briefEl = $('wiki-exec-brief');
+  if (briefEl) {
+    const compiledAt = eb.compiled_at ? shortTs(eb.compiled_at) : '—';
+    const validUntil = eb.valid_until ? shortTs(eb.valid_until) : '—';
+    const cs = eb.credit_strategy || {};
+    const tokens = (cs.recommended_tokens || []).join(', ') || '—';
+    briefEl.innerHTML = `
+      <div class="list-item">
+        <div class="item-left"><span class="item-sub">Compiled</span> <span class="item-title">${escHtml(compiledAt)}</span></div>
+        <div class="item-right">valid until ${escHtml(validUntil)}</div>
+      </div>
+      <div class="list-item">
+        <div class="item-left"><span class="item-sub">Credit Tokens</span> <span class="item-title">${escHtml(tokens)}</span></div>
+        <div class="item-right">VP flush ${cs.vp_flush_threshold ?? '—'}</div>
+      </div>`;
+  }
+
+  // Top Themes
+  const themesEl = $('wiki-top-themes');
+  if (themesEl) {
+    const themes = eb.top_themes || [];
+    if (themes.length === 0) {
+      themesEl.innerHTML = '<span class="muted small">—</span>';
+    } else {
+      themesEl.innerHTML = themes.map(th => `
+        <div class="list-item">
+          <div class="item-left">
+            <span class="item-title">${escHtml(th.name)}</span>
+            <span class="item-sub">${escHtml((th.agent_action || '').slice(0, 120))}</span>
+          </div>
+          <div class="item-right">${(th.heat_score ?? 0).toFixed(3)}</div>
+        </div>`).join('');
+    }
+  }
+
+  // Ingest Pipeline matrix
+  const pipeEl = $('wiki-pipeline-table');
+  if (pipeEl) {
+    const pipes = wiki.ingest_pipeline || [];
+    const header = `<div class="wiki-pipeline-row wiki-pipeline-header">
+      <span>Name</span><span>Script</span><span>Freq</span><span>Last Run</span><span>Status</span>
+    </div>`;
+    const rows = pipes.map(p => {
+      const st = (p.status || 'missing').toLowerCase();
+      const badgeCls = st === 'ok' ? 'badge-ok' : st === 'stale' ? 'badge-warn' : st === 'warn' ? 'badge-warn' : 'badge-error';
+      const lastRun = p.last_run ? shortTs(p.last_run) : '—';
+      return `<div class="wiki-pipeline-row">
+        <span class="mono small">${escHtml(p.name)}</span>
+        <span class="muted small">${escHtml(p.script)}</span>
+        <span class="muted small">${escHtml(p.freq)}</span>
+        <span class="mono small">${escHtml(lastRun)}</span>
+        <span class="badge sm ${badgeCls}">${escHtml(st)}</span>
+      </div>`;
+    }).join('');
+    pipeEl.innerHTML = header + rows;
+  }
+
+  // Agent Wiki Status — 3 cards
+  const agentEl = $('wiki-agent-status');
+  if (agentEl) {
+    const agents = wiki.agent_wiki_status || {};
+    agentEl.innerHTML = ['main', 'bookmarker', 'trader'].map(name => {
+      const d = agents[name] || {};
+      const briefAvail = d.wiki_brief_available ?? d.wiki_brief_available ?? '—';
+      const topTheme = d.wiki_top_theme || '—';
+      const ticks = Array.isArray(d.wiki_trending_ticks) ? d.wiki_trending_ticks.join(', ') : (d.wiki_trending_ticks || '—');
+      const platAvail = d.wiki_platform_available ?? '—';
+      return `<div class="wiki-agent-card">
+        <div class="agent-name">${escHtml(name)}</div>
+        <div class="kv-row"><span class="k">brief_available</span><span class="v ${briefAvail === true ? 'clr-ok' : ''}">${briefAvail}</span></div>
+        <div class="kv-row"><span class="k">top_theme</span><span class="v">${escHtml(topTheme)}</span></div>
+        <div class="kv-row"><span class="k">trending_ticks</span><span class="v small">${escHtml(ticks)}</span></div>
+        <div class="kv-row"><span class="k">platform_available</span><span class="v ${platAvail === true ? 'clr-ok' : ''}">${platAvail}</span></div>
+      </div>`;
+    }).join('');
+  }
+
+  // Lint Health
+  const lintEl = $('wiki-lint-summary');
+  if (lintEl) {
+    const lint = wiki.lint || {};
+    const brokenCls = (lint.broken_links_count || 0) > 0 ? 'clr-error' : 'clr-ok';
+    const staleCls = (lint.stale_count || 0) > 0 ? 'clr-warn' : 'clr-ok';
+    const orphanCls = (lint.orphan_count || 0) > 0 ? 'clr-warn' : 'clr-ok';
+    lintEl.innerHTML = `<div class="wiki-lint-row">
+      <div class="wiki-lint-metric"><span class="lint-val ${brokenCls}">${lint.broken_links_count ?? '—'}</span><span class="lint-label">Broken Links</span></div>
+      <div class="wiki-lint-metric"><span class="lint-val ${staleCls}">${lint.stale_count ?? '—'}</span><span class="lint-label">Stale</span></div>
+      <div class="wiki-lint-metric"><span class="lint-val ${orphanCls}">${lint.orphan_count ?? '—'}</span><span class="lint-label">Orphan</span></div>
+      <div class="wiki-lint-metric"><span class="lint-val">${lint.concepts_checked ?? '—'}</span><span class="lint-label">Concepts</span></div>
+      <div class="wiki-lint-metric"><span class="lint-val muted small">${lint.generated_at ? shortTs(lint.generated_at) : '—'}</span><span class="lint-label">Generated</span></div>
+    </div>`;
+  }
 }
 
 // ── Data Alignment by 0xNought ────────────────────────────────────────────
