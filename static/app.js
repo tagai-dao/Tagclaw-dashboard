@@ -35,28 +35,7 @@ const I18N = {
     'section-rewards': '可领奖励',
     'section-risk-flags': '风险标志',
     'section-timeline': '时间轴',
-    'section-data-collection': '数据采集',
-    'dc-x-sync': 'X 同步',
-    'dc-alignment': '0xNought 数据对齐',
-    'dc-community': '社区参与数据',
-    'dc-monitor': '监控每日社区概览',
-    'dc-trending': '热门资讯',
-    'dc-last-sync': '上次同步',
-    'dc-source': '来源',
-    'dc-tweets': '推文数',
-    'dc-bookmarks': '收藏数',
-    'dc-tas-social': 'TAS_social',
-    'dc-align-score': '对齐分',
-    'dc-community-score': '社区分',
-    'dc-window': '窗口',
-    'dc-community-score-val': '社区分',
-    'dc-scanned-at': '扫描时间',
-    'dc-posts-scanned': '已扫描帖子',
-    'dc-source-label': '来源',
-    'dc-monitor-community': '社区',
-    'dc-monitor-latest-post': '最新帖子',
-    'dc-monitor-age': '时效',
-    'dc-monitor-stale': '是否过期',
+    'section-wiki': 'self-IP LLM Wiki',
     'section-feedback': '智能体反馈循环',
     'panel-dev': '鲁班 / Claude 调度',
     'label-status': '状态',
@@ -186,28 +165,7 @@ const I18N = {
     'section-rewards': 'Claimable Rewards',
     'section-risk-flags': 'Risk Flags',
     'section-timeline': 'Timeline',
-    'section-data-collection': 'Data Collection',
-    'dc-x-sync': 'X Sync',
-    'dc-alignment': 'Data Alignment by 0xNought',
-    'dc-community': 'Community Engagement Data',
-    'dc-monitor': 'Monitor Daily Community Overviews',
-    'dc-trending': 'Trending News',
-    'dc-last-sync': 'Last Sync',
-    'dc-source': 'Source',
-    'dc-tweets': 'Tweets',
-    'dc-bookmarks': 'Bookmarks',
-    'dc-tas-social': 'TAS_social',
-    'dc-align-score': 'Align Score',
-    'dc-community-score': 'Community Score',
-    'dc-window': 'Window',
-    'dc-community-score-val': 'Community Score',
-    'dc-scanned-at': 'Scanned At',
-    'dc-posts-scanned': 'Posts Scanned',
-    'dc-source-label': 'Source',
-    'dc-monitor-community': 'Community',
-    'dc-monitor-latest-post': 'Latest Post',
-    'dc-monitor-age': 'Age',
-    'dc-monitor-stale': 'Stale',
+    'section-wiki': 'self-IP LLM Wiki',
     'section-feedback': 'Agent Feedback Loop',
     'panel-dev': 'Luban / Claude Dispatch',
     'label-status': 'Status',
@@ -463,8 +421,7 @@ function renderStatus(data) {
   renderBookmarker(data.bookmarker || {});
   renderTrader(data.trader || {});
   renderDev(data.dev_dispatch || {});
-  renderWikiPanel(data.wiki_system || {});
-  renderDataCollection(data).catch(e => console.warn('renderDataCollection error:', e));
+  renderWikiModule(data.wiki_system || {});
 }
 
 function numericOrNull(v) {
@@ -1326,202 +1283,168 @@ function agentState(statusText, updatedAt) {
   return 'idle';
 }
 
-// ── Wiki System Panel ────────────────────────────────────────────────────
+// ── self-IP LLM Wiki Module ──────────────────────────────────────────────
 
-function renderWikiPanel(wiki) {
-  if (!wiki) { return; }
-
-  // Execution Brief
-  const eb = wiki.execution_brief || {};
-  const briefEl = $('wiki-exec-brief');
-  if (briefEl) {
-    const compiledAt = eb.compiled_at ? shortTs(eb.compiled_at) : '—';
-    const validUntil = eb.valid_until ? shortTs(eb.valid_until) : '—';
-    const cs = eb.credit_strategy || {};
-    const tokens = (cs.recommended_tokens || []).join(', ') || '—';
-    briefEl.innerHTML = `
-      <div class="list-item">
-        <div class="item-left"><span class="item-sub">Compiled</span> <span class="item-title">${escHtml(compiledAt)}</span></div>
-        <div class="item-right">valid until ${escHtml(validUntil)}</div>
-      </div>
-      <div class="list-item">
-        <div class="item-left"><span class="item-sub">Credit Tokens</span> <span class="item-title">${escHtml(tokens)}</span></div>
-        <div class="item-right">VP flush ${cs.vp_flush_threshold ?? '—'}</div>
-      </div>`;
+function renderWikiModule(wiki) {
+  if (!wiki || !wiki.raw_layer) {
+    // Fetch from /api/wiki if not present in status payload
+    fetchJSON('/api/wiki').then(w => _renderWikiModuleInner(w)).catch(e => console.warn('wiki fetch error:', e));
+    return;
   }
+  _renderWikiModuleInner(wiki);
+}
 
-  // Top Themes
-  const themesEl = $('wiki-top-themes');
-  if (themesEl) {
-    const themes = eb.top_themes || [];
-    if (themes.length === 0) {
-      themesEl.innerHTML = '<span class="muted small">—</span>';
-    } else {
-      themesEl.innerHTML = themes.map(th => `
-        <div class="list-item">
-          <div class="item-left">
-            <span class="item-title">${escHtml(th.name)}</span>
-            <span class="item-sub">${escHtml((th.agent_action || '').slice(0, 120))}</span>
-          </div>
-          <div class="item-right">${(th.heat_score ?? 0).toFixed(3)}</div>
-        </div>`).join('');
-    }
-  }
+function _renderWikiModuleInner(wiki) {
+  renderRawLayer(wiki);
+  renderWikiLayer(wiki);
+  renderExecutionBrief(wiki);
+  renderIngestMatrix(wiki);
+  renderAgentWikiStatus(wiki);
+}
 
-  // Ingest Pipeline matrix
-  const pipeEl = $('wiki-pipeline-table');
-  if (pipeEl) {
-    const pipes = wiki.ingest_pipeline || [];
-    const header = `<div class="wiki-pipeline-row wiki-pipeline-header">
-      <span>Name</span><span>Script</span><span>Freq</span><span>Last Run</span><span>Status</span>
+function _ageText(hours) {
+  if (hours == null) return '—';
+  if (hours < 1) return '<1h ago';
+  if (hours < 24) return Math.round(hours) + 'h ago';
+  return Math.round(hours / 24) + 'd ago';
+}
+
+function renderRawLayer(wiki) {
+  const raw = wiki.raw_layer || {};
+  const el = $('wiki-raw-list');
+  const totalEl = $('wiki-raw-total');
+  if (totalEl) totalEl.textContent = (raw.total_files ?? 0).toLocaleString() + ' files';
+  if (!el) return;
+  const subdirs = raw.subdirs || {};
+  const keys = Object.keys(subdirs);
+  if (!keys.length) { el.innerHTML = '<span class="muted small">no data</span>'; return; }
+  el.innerHTML = keys.map(k => {
+    const d = subdirs[k];
+    return `<div class="wiki-dir-row">
+      <span class="wiki-dir-name" style="opacity:.7">${escHtml(k)}</span>
+      <span class="wiki-dir-meta"><span>${d.file_count ?? 0}</span><span class="muted">${_ageText(d.newest_file_age_hours)}</span></span>
     </div>`;
-    const rows = pipes.map(p => {
-      const st = (p.status || 'missing').toLowerCase();
-      const badgeCls = st === 'ok' ? 'badge-ok' : st === 'stale' ? 'badge-warn' : st === 'warn' ? 'badge-warn' : 'badge-error';
-      const lastRun = p.last_run ? shortTs(p.last_run) : '—';
-      return `<div class="wiki-pipeline-row">
-        <span class="mono small">${escHtml(p.name)}</span>
-        <span class="muted small">${escHtml(p.script)}</span>
-        <span class="muted small">${escHtml(p.freq)}</span>
-        <span class="mono small">${escHtml(lastRun)}</span>
-        <span class="badge sm ${badgeCls}">${escHtml(st)}</span>
-      </div>`;
-    }).join('');
-    pipeEl.innerHTML = header + rows;
-  }
+  }).join('');
+}
 
-  // Agent Wiki Status — 3 cards
-  const agentEl = $('wiki-agent-status');
-  if (agentEl) {
-    const agents = wiki.agent_wiki_status || {};
-    agentEl.innerHTML = ['main', 'bookmarker', 'trader'].map(name => {
-      const d = agents[name] || {};
-      const briefAvail = d.wiki_brief_available ?? d.wiki_brief_available ?? '—';
-      const topTheme = d.wiki_top_theme || '—';
-      const ticks = Array.isArray(d.wiki_trending_ticks) ? d.wiki_trending_ticks.join(', ') : (d.wiki_trending_ticks || '—');
-      const platAvail = d.wiki_platform_available ?? '—';
-      return `<div class="wiki-agent-card">
-        <div class="agent-name">${escHtml(name)}</div>
-        <div class="kv-row"><span class="k">brief_available</span><span class="v ${briefAvail === true ? 'clr-ok' : ''}">${briefAvail}</span></div>
-        <div class="kv-row"><span class="k">top_theme</span><span class="v">${escHtml(topTheme)}</span></div>
-        <div class="kv-row"><span class="k">trending_ticks</span><span class="v small">${escHtml(ticks)}</span></div>
-        <div class="kv-row"><span class="k">platform_available</span><span class="v ${platAvail === true ? 'clr-ok' : ''}">${platAvail}</span></div>
-      </div>`;
-    }).join('');
-  }
+function renderWikiLayer(wiki) {
+  const wl = wiki.wiki_layer || {};
+  const el = $('wiki-wiki-list');
+  const totalEl = $('wiki-wiki-total');
+  if (totalEl) totalEl.textContent = (wl.total_files ?? 0).toLocaleString() + ' files';
+  if (!el) return;
+  const subdirs = wl.subdirs || {};
+  const keys = Object.keys(subdirs);
+  if (!keys.length) { el.innerHTML = '<span class="muted small">no data</span>'; return; }
+  el.innerHTML = keys.map(k => {
+    const d = subdirs[k];
+    return `<div class="wiki-dir-row">
+      <span class="wiki-dir-name">${escHtml(k)}</span>
+      <span class="wiki-dir-meta"><span>${d.file_count ?? 0}</span><span class="muted">${_ageText(d.newest_file_age_hours)}</span><span class="wiki-dir-tag">${escHtml(d.role || 'compiled')}</span></span>
+    </div>`;
+  }).join('');
 
-  // Lint Health
-  const lintEl = $('wiki-lint-summary');
+  // Lint inline
+  const lintEl = $('wiki-lint-inline');
   if (lintEl) {
     const lint = wiki.lint || {};
     const brokenCls = (lint.broken_links_count || 0) > 0 ? 'clr-error' : 'clr-ok';
     const staleCls = (lint.stale_count || 0) > 0 ? 'clr-warn' : 'clr-ok';
     const orphanCls = (lint.orphan_count || 0) > 0 ? 'clr-warn' : 'clr-ok';
-    lintEl.innerHTML = `<div class="wiki-lint-row">
-      <div class="wiki-lint-metric"><span class="lint-val ${brokenCls}">${lint.broken_links_count ?? '—'}</span><span class="lint-label">Broken Links</span></div>
-      <div class="wiki-lint-metric"><span class="lint-val ${staleCls}">${lint.stale_count ?? '—'}</span><span class="lint-label">Stale</span></div>
-      <div class="wiki-lint-metric"><span class="lint-val ${orphanCls}">${lint.orphan_count ?? '—'}</span><span class="lint-label">Orphan</span></div>
-      <div class="wiki-lint-metric"><span class="lint-val">${lint.concepts_checked ?? '—'}</span><span class="lint-label">Concepts</span></div>
-      <div class="wiki-lint-metric"><span class="lint-val muted small">${lint.generated_at ? shortTs(lint.generated_at) : '—'}</span><span class="lint-label">Generated</span></div>
-    </div>`;
+    lintEl.innerHTML = `Lint: <span class="${brokenCls}">${lint.broken_links_count ?? 0} broken</span> / <span class="${staleCls}">${lint.stale_count ?? 0} stale</span> / <span class="${orphanCls}">${lint.orphan_count ?? 0} orphan</span>`;
   }
 }
 
-// ── Data Alignment by 0xNought ────────────────────────────────────────────
-
-function renderDataAlignment(data) {
-  const rec = (data.bookmarker?.twin_recognition?.alignment) || {};
-  const level = rec.level ?? '—';
-  const score = rec.total_score ?? '—';
-  const interactions = rec.interactions_count ?? '—';
-  const lastAt = rec.last_interaction_at ? shortTs(rec.last_interaction_at) : '—';
-
-  setText('dc-alignment-level', level);
-  setText('dc-alignment-score', score);
-  setText('dc-alignment-interactions', interactions);
-  setText('dc-alignment-last', lastAt);
-
-  const pill = $('dc-alignment-status');
-  if (pill) {
-    pill.textContent = level !== '—' ? `Level ${level}` : '—';
-    pill.className = 'dc-status-pill ' + (level === 3 ? 'ok' : level === 2 ? 'stale' : '');
-  }
-}
-
-// ── Data Collection Module ────────────────────────────────────────────────
-
-function dcPill(id, status) {
-  const el = $(id);
+function renderExecutionBrief(wiki) {
+  const eb = wiki.execution_brief || {};
+  const el = $('wiki-brief-content');
   if (!el) return;
-  el.textContent = status || '—';
-  el.className = 'dc-status-pill';
-  const s = String(status || '').toLowerCase();
-  if (s === 'ok' || s === 'healthy') el.classList.add('ok');
-  else if (s === 'stale') el.classList.add('stale');
-  else if (s === 'alert' || s === 'error' || s === 'fail') el.classList.add('alert');
+
+  const compiledAt = eb.compiled_at ? shortTs(eb.compiled_at) : '—';
+  const validUntil = eb.valid_until || '';
+  let countdown = '';
+  if (validUntil) {
+    try {
+      const diff = (new Date(validUntil) - Date.now()) / (1000 * 60 * 60 * 24);
+      countdown = diff > 0 ? `(${Math.ceil(diff)}d left)` : '(expired)';
+    } catch (_) {}
+  }
+
+  const cs = eb.credit_strategy || {};
+  const tokens = (cs.recommended_tokens || []).join(', ') || '—';
+
+  const themes = eb.top_themes || [];
+  const themesHtml = themes.map(th => {
+    const pct = Math.min(100, Math.max(0, (th.heat_score ?? 0) * 100));
+    return `<div class="wiki-theme-row">
+      <span class="small" style="min-width:100px">${escHtml(th.name)}</span>
+      <div class="wiki-theme-bar"><div class="wiki-theme-bar-fill" style="width:${pct.toFixed(0)}%"></div></div>
+      <span class="mono small muted">${(th.heat_score ?? 0).toFixed(3)}</span>
+      <span class="muted small">${escHtml((th.agent_action || '').slice(0, 40))}</span>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="wiki-dir-row"><span class="wiki-dir-name">compiled_at</span><span class="mono small">${escHtml(compiledAt)}</span></div>
+    <div class="wiki-dir-row"><span class="wiki-dir-name">valid_until</span><span class="mono small">${validUntil ? escHtml(shortTs(validUntil)) : '—'} <span class="muted">${escHtml(countdown)}</span></span></div>
+    <div class="wiki-dir-row"><span class="wiki-dir-name">vp_flush</span><span class="mono small">${cs.vp_flush_threshold ?? '—'}</span></div>
+    <div class="wiki-dir-row"><span class="wiki-dir-name">daily_vp</span><span class="mono small">${cs.daily_vp_target ?? '—'}</span></div>
+    <div class="wiki-dir-row"><span class="wiki-dir-name">tokens</span><span class="mono small">${escHtml(tokens)}</span></div>
+    ${themesHtml || '<div class="muted small">no themes</div>'}`;
 }
 
-async function renderDataCollection(data) {
-  const bm = data.bookmarker || {};
-  const tb = bm.topic_brief || {};
+function renderIngestMatrix(wiki) {
+  const pipes = wiki.ingest_pipeline || [];
+  const tbody = $('wiki-ingest-tbody');
+  const summaryEl = $('wiki-ingest-summary');
+  if (!tbody) return;
 
-  // ── Card 1: X Sync ──
-  const xSyncStatus = bm.x_sync_status || bm.source_health?.status || '—';
-  dcPill('dc-x-sync-status', xSyncStatus);
-  setText('dc-x-sync-at', bm.x_sync_at || bm.source_health?.updated_at ? shortTs(bm.x_sync_at || bm.source_health?.updated_at) : '—');
-  const sh = bm.source_health || {};
-  const okSource = ['bird', 'browser_relay', 'xurl'].find(k => sh[k] === 'ok') || '—';
-  setText('dc-x-sync-source', okSource);
-  const totalItems = (Array.isArray(bm.x_posts) ? bm.x_posts.length : 0)
-                   + (Array.isArray(bm.x_bookmarks) ? bm.x_bookmarks.length : 0);
-  setText('dc-x-sync-bookmarks', totalItems > 0 ? totalItems : '—');
+  const okCount = pipes.filter(p => p.status === 'ok').length;
+  if (summaryEl) summaryEl.textContent = `${okCount}/${pipes.length} ok`;
 
-  // ── Card 2: Data Alignment by 0xNought ──
-  renderDataAlignment(data);
+  tbody.innerHTML = pipes.map(p => {
+    const st = (p.status || 'missing').toLowerCase();
+    const badgeCls = st === 'ok' ? 'ok' : st === 'stale' ? 'stale' : 'missing';
+    const lastRun = p.last_run ? shortTs(p.last_run) : '—';
+    const flow = (p.raw_output && p.raw_output !== '—' ? p.raw_output : '') + (p.wiki_output ? ' &rarr; ' + p.wiki_output : '');
+    return `<tr>
+      <td class="mono small">${escHtml(p.name)}</td>
+      <td class="muted small">${escHtml(p.script)}</td>
+      <td class="muted small">${escHtml(p.freq)}</td>
+      <td class="muted small" style="font-size:.7em">${flow || '—'}</td>
+      <td class="mono small">${escHtml(lastRun)}</td>
+      <td><span class="wiki-badge ${badgeCls}">${escHtml(st)}</span></td>
+    </tr>`;
+  }).join('');
+}
 
-  // ── Card 3: Community Engagement ──
-  try {
-    const cs = await fetchJSON('/api/runtime/bookmarker/community-scan.json');
-    dcPill('dc-community-status', cs.status || 'ok');
-    setText('dc-community-score',   fmt(cs.community_score));
-    setText('dc-community-scanned', cs.scanned_at ? shortTs(cs.scanned_at) : '—');
-    setText('dc-community-posts',   cs.posts_scanned ?? cs.post_count ?? cs.feed_size ?? '—');
-    setText('dc-community-source',  cs.source || cs.community || 'TagClaw Feed');
-  } catch (_) {
-    dcPill('dc-community-status', '—');
-  }
+function renderAgentWikiStatus(wiki) {
+  const agentEl = $('wiki-agent-cards');
+  if (!agentEl) return;
+  const agents = wiki.agent_wiki_status || {};
+  const icons = { main: '&#129504;', bookmarker: '&#128204;', trader: '&#128176;' };
+  const agentKeys = { main: ['wiki_brief_available', 'wiki_top_theme', 'wiki_content_direction', 'wiki_trending_ticks', 'wiki_platform_available', 'wiki_platform_snapshot_age_hours', 'wiki_brief_valid_until'],
+                      bookmarker: ['wiki_brief_available', 'wiki_top_theme', 'wiki_trending_ticks', 'wiki_platform_available'],
+                      trader: ['wiki_platform_available', 'wiki_trending_ticks', 'wiki_credit_vp_threshold', 'wiki_brief_available'] };
 
-  // ── Card 4: Monitor Daily Community Overviews ──
-  try {
-    const mon = await fetchJSON('/api/monitor/steemit');
-    const stale = mon.stale === true || mon.stale === 'true';
-    dcPill('dc-monitor-status', stale ? 'alert' : 'ok');
-    const title = mon.latest_post_title || mon.title || '—';
-    setText('dc-monitor-latest-post', title.length > 40 ? title.slice(0, 40) + '…' : title);
-    setText('dc-monitor-age',   mon.latest_post_age_hours != null ? mon.latest_post_age_hours + 'h' : '—');
-    setText('dc-monitor-stale', stale ? 'yes' : 'no');
-  } catch (_) {
-    dcPill('dc-monitor-status', '—');
-  }
+  agentEl.innerHTML = ['main', 'bookmarker', 'trader'].map(name => {
+    const d = agents[name] || {};
+    const keys = agentKeys[name] || Object.keys(d);
+    const rows = keys.map(k => {
+      let v = d[k];
+      if (Array.isArray(v)) {
+        v = v.map(t => `<span class="wiki-tick-pill">${escHtml(t)}</span>`).join('');
+        return `<div class="kv-row"><span class="k">${escHtml(k.replace('wiki_', ''))}</span><span class="v">${v}</span></div>`;
+      }
+      const display = v === true ? '<span class="clr-ok">true</span>' : v === false ? '<span class="clr-error">false</span>' : escHtml(String(v ?? '—'));
+      return `<div class="kv-row"><span class="k">${escHtml(k.replace('wiki_', ''))}</span><span class="v">${display}</span></div>`;
+    }).join('');
 
-  // ── Card 5: Trending News ──
-  const trendEl = $('dc-trending-list');
-  if (trendEl) {
-    const keywords = tb.keywords || [];
-    let ticks = [];
-    try {
-      const trend = await fetchJSON('/api/runtime/bookmarker/x-trend-latest.json');
-      ticks = trend.ticks || trend.keywords || trend.trending || [];
-    } catch (_) {}
-    const all = [...new Set([...keywords, ...ticks])].slice(0, 20);
-    if (all.length) {
-      dcPill('dc-trending-status', 'ok');
-      trendEl.innerHTML = all.map(k => `<span class="dc-tag">#${escHtml(String(k))}</span>`).join('');
-    } else {
-      dcPill('dc-trending-status', '—');
-      trendEl.innerHTML = '<span class="muted small">—</span>';
-    }
-  }
+    return `<div class="wiki-agent-card">
+      <div class="agent-name"><span>${icons[name] || ''}</span> ${escHtml(name)}</div>
+      ${rows || '<span class="muted small">no wiki fields</span>'}
+    </div>`;
+  }).join('');
 }
 
 // ── Timeline ──────────────────────────────────────────────────────────────

@@ -324,30 +324,6 @@
     <div id="dev-result-links" class="list-block">—</div>
   </section>
 
-  <!-- ── Wiki System ── -->
-  <section class="card" id="wiki-panel">
-    <h2 class="card-title" data-i18n="panel-wiki">Wiki System</h2>
-
-    <div class="section-label">Execution Brief</div>
-    <div id="wiki-exec-brief" class="list-block">—</div>
-
-    <div class="section-label">Top Themes</div>
-    <div id="wiki-top-themes" class="list-block">—</div>
-
-    <div class="x-section-header" onclick="toggleSection('wiki-pipeline')">
-      <span class="section-label">Ingest Pipeline</span>
-      <button id="wiki-pipeline-toggle" class="x-toggle-btn">&#9650;</button>
-    </div>
-    <div id="wiki-pipeline-collapsible" class="x-collapsible open">
-      <div id="wiki-pipeline-table" class="list-block">—</div>
-    </div>
-
-    <div class="section-label">Agent Wiki Status</div>
-    <div id="wiki-agent-status" class="wiki-agent-grid">—</div>
-
-    <div class="section-label">Lint Health</div>
-    <div id="wiki-lint-summary" class="row compact">—</div>
-  </section>
 
 </main>
 
@@ -360,138 +336,45 @@
     </div>
   </section>
 
-  <section id="data-collection-section" class="lower-panel">
-    <h2 class="section-heading" data-i18n="section-data-collection">Data Collection</h2>
-    <div class="data-collection-grid">
+  <section id="wiki-section" class="lower-panel">
+    <h2 class="section-heading" data-i18n="section-wiki">self-IP LLM Wiki</h2>
+    <div id="wiki-module-root" style="overflow-y:auto;flex:1 1 0;min-height:0;padding:0 .5rem .5rem">
+      <div class="wiki-arch-note">Raw(read-only) &rarr; LLM Compile &rarr; Wiki(compiled) &rarr; Agent Heartbeat Read(decisions)</div>
 
-      <!-- 1. X SYNC -->
-      <div class="dc-card card-shell dc-card-wide" id="dc-x-sync">
-        <div class="dc-card-header">
-          <span class="dc-icon">🐦</span>
-          <span class="dc-title" data-i18n="dc-x-sync">X Sync</span>
-          <span class="dc-status-pill" id="dc-x-sync-status">—</span>
+      <!-- Row 1: Data Layer Overview -->
+      <div class="wiki-section-label">Data Layer Overview</div>
+      <div class="wiki-grid">
+        <div class="wiki-card" id="wiki-raw-layer">
+          <div class="wiki-card-header"><span class="wiki-card-icon">&#128229;</span><span class="wiki-card-title">Raw</span><span class="wiki-total-badge" id="wiki-raw-total">—</span></div>
+          <div class="wiki-card-subtitle">read-only source data</div>
+          <div id="wiki-raw-list"></div>
         </div>
-        <div class="dc-card-body">
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-last-sync">Last Sync</span>
-            <span class="dc-value" id="dc-x-sync-at">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-source">Source</span>
-            <span class="dc-value" id="dc-x-sync-source">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-items">Items</span>
-            <span class="dc-value" id="dc-x-sync-bookmarks">—</span>
-          </div>
+        <div class="wiki-card" id="wiki-wiki-layer">
+          <div class="wiki-card-header"><span class="wiki-card-icon">&#128218;</span><span class="wiki-card-title">Wiki</span><span class="wiki-total-badge" id="wiki-wiki-total">—</span></div>
+          <div class="wiki-card-subtitle">compiled + manual artifacts</div>
+          <div id="wiki-wiki-list"></div>
+          <div id="wiki-lint-inline" class="muted small" style="margin-top:6px"></div>
         </div>
-        <div class="x-section-header" onclick="toggleXSection('x-posts')">
-          <span class="section-label" data-i18n="section-x-posts">X 帖子</span>
-          <span id="x-posts-count" class="badge sm">0</span>
-          <button class="x-toggle-btn" id="x-posts-toggle">▼</button>
-        </div>
-        <div class="x-collapsible" id="x-posts-list"></div>
-        <div class="x-section-header" onclick="toggleXSection('x-bookmarks')">
-          <span class="section-label" data-i18n="section-x-bookmarks">X 收藏</span>
-          <span id="x-bookmarks-count" class="badge sm">0</span>
-          <button class="x-toggle-btn" id="x-bookmarks-toggle">▼</button>
-        </div>
-        <div class="x-collapsible" id="x-bookmarks-list"></div>
-      </div>
-
-      <!-- 2. Data Alignment by 0xNought -->
-      <div class="dc-card card-shell" id="dc-alignment">
-        <div class="dc-card-header">
-          <span class="dc-icon">🎯</span>
-          <span class="dc-title" data-i18n="dc-alignment">Data Alignment by 0xNought</span>
-          <span class="dc-status-pill" id="dc-alignment-status">—</span>
-        </div>
-        <div class="dc-card-body">
-          <div class="dc-stat">
-            <span class="dc-label">Alignment Level</span>
-            <span class="dc-value" id="dc-alignment-level">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label">Total Score</span>
-            <span class="dc-value" id="dc-alignment-score">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label">Interactions</span>
-            <span class="dc-value" id="dc-alignment-interactions">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label">Last Interaction</span>
-            <span class="dc-value" id="dc-alignment-last">—</span>
-          </div>
+        <div class="wiki-card" id="wiki-execution-brief">
+          <div class="wiki-card-header"><span class="wiki-card-icon">&#9889;</span><span class="wiki-card-title">Execution Brief</span></div>
+          <div class="wiki-card-subtitle">pre-compiled decision summary</div>
+          <div id="wiki-brief-content"></div>
         </div>
       </div>
 
-      <!-- 3. Community Engagement Data -->
-      <div class="dc-card card-shell" id="dc-community">
-        <div class="dc-card-header">
-          <span class="dc-icon">🌐</span>
-          <span class="dc-title" data-i18n="dc-community">Community Engagement Data</span>
-          <span class="dc-status-pill" id="dc-community-status">—</span>
-        </div>
-        <div class="dc-card-body">
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-community-score-val">Community Score</span>
-            <span class="dc-value" id="dc-community-score">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-scanned-at">Scanned At</span>
-            <span class="dc-value" id="dc-community-scanned">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-posts-scanned">Posts Scanned</span>
-            <span class="dc-value" id="dc-community-posts">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-source-label">Source</span>
-            <span class="dc-value" id="dc-community-source">—</span>
-          </div>
-        </div>
+      <!-- Row 2: Ingest Pipeline Matrix -->
+      <div class="wiki-section-label">Ingest Pipeline Matrix</div>
+      <div class="wiki-card">
+        <div id="wiki-ingest-summary" class="muted small" style="margin-bottom:6px"></div>
+        <table class="wiki-pipeline-table" id="wiki-ingest-table">
+          <thead><tr><th>Pipeline</th><th>Script</th><th>Freq</th><th>Raw &rarr; Wiki</th><th>Last Run</th><th>Status</th></tr></thead>
+          <tbody id="wiki-ingest-tbody"></tbody>
+        </table>
       </div>
 
-      <!-- 4. Monitor Daily Community Overviews -->
-      <div class="dc-card card-shell" id="dc-monitor">
-        <div class="dc-card-header">
-          <span class="dc-icon">📊</span>
-          <span class="dc-title" data-i18n="dc-monitor">Monitor Daily Community Overviews</span>
-          <span class="dc-status-pill" id="dc-monitor-status">—</span>
-        </div>
-        <div class="dc-card-body">
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-monitor-community">Community</span>
-            <span class="dc-value" id="dc-monitor-community">hive-150943</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-monitor-latest-post">Latest Post</span>
-            <span class="dc-value" id="dc-monitor-latest-post">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-monitor-age">Age</span>
-            <span class="dc-value" id="dc-monitor-age">—</span>
-          </div>
-          <div class="dc-stat">
-            <span class="dc-label" data-i18n="dc-monitor-stale">Stale</span>
-            <span class="dc-value" id="dc-monitor-stale">—</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 5. Trending News -->
-      <div class="dc-card card-shell dc-card-wide" id="dc-trending">
-        <div class="dc-card-header">
-          <span class="dc-icon">🔥</span>
-          <span class="dc-title" data-i18n="dc-trending">Trending News</span>
-          <span class="dc-status-pill" id="dc-trending-status">—</span>
-        </div>
-        <div class="dc-card-body">
-          <div id="dc-trending-list" class="dc-trending-list">—</div>
-        </div>
-      </div>
-
+      <!-- Row 3: Agent Wiki-first Status -->
+      <div class="wiki-section-label">Agent Wiki-first Status</div>
+      <div class="wiki-grid" id="wiki-agent-cards"></div>
     </div>
   </section>
 

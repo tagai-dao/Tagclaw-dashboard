@@ -115,9 +115,64 @@ def _parse_lint_frontmatter(path: Path) -> dict:
     return result
 
 
+def _count_files(directory: Path, recursive: bool = True) -> int:
+    """Count files in a directory (optionally recursive)."""
+    try:
+        if not directory.is_dir():
+            return 0
+        if recursive:
+            return sum(1 for f in directory.rglob("*") if f.is_file())
+        return sum(1 for f in directory.iterdir() if f.is_file())
+    except Exception:
+        return 0
+
+
+def _dir_info(directory: Path) -> dict:
+    """Return file_count and newest_file_age_hours for a directory."""
+    try:
+        if not directory.is_dir():
+            return {"file_count": 0, "newest_file_age_hours": None}
+        files = [f for f in directory.rglob("*") if f.is_file()]
+        if not files:
+            return {"file_count": 0, "newest_file_age_hours": None}
+        newest_mtime = max(f.stat().st_mtime for f in files)
+        age_hours = (datetime.now(timezone.utc).timestamp() - newest_mtime) / 3600
+        return {"file_count": len(files), "newest_file_age_hours": round(age_hours, 1)}
+    except Exception:
+        return {"file_count": 0, "newest_file_age_hours": None}
+
+
 def _load_wiki_status() -> dict:
-    """Build wiki_system status dict for the dashboard."""
+    """Build full wiki system status for the dashboard: raw + wiki layers, ingest pipeline, agents, lint."""
     wiki_dir = WORKSPACE / "wiki"
+    raw_dir = WORKSPACE / "raw"
+    now = datetime.now(timezone.utc)
+
+    # ── Raw Layer ──
+    raw_subdirs = {}
+    raw_total = 0
+    if raw_dir.is_dir():
+        for child in sorted(raw_dir.iterdir()):
+            if child.is_dir():
+                info = _dir_info(child)
+                raw_subdirs[child.name] = info
+                raw_total += info["file_count"]
+
+    # ── Wiki Layer ──
+    wiki_subdirs = {}
+    wiki_total = 0
+    ROLE_MAP = {
+        "concepts": "compiled", "identity": "manual", "execution": "compiled",
+        "synthesis": "compiled", "tagclaw-platform": "runtime",
+        "queries": "append-only", "social": "compiled", "lint": "runtime",
+    }
+    if wiki_dir.is_dir():
+        for child in sorted(wiki_dir.iterdir()):
+            if child.is_dir():
+                info = _dir_info(child)
+                role = ROLE_MAP.get(child.name, "compiled")
+                wiki_subdirs[child.name] = {**info, "role": role}
+                wiki_total += info["file_count"]
 
     # ── Execution Brief ──
     brief_data = _load(RUNTIME / "shared" / "wiki-execution-brief.json") or {}
@@ -136,50 +191,84 @@ def _load_wiki_status() -> dict:
         "credit_strategy": credit_strategy,
     }
 
-    # ── Ingest Pipeline ──
-    # 1. platform_snapshot
+    # ── Ingest Pipeline (8 entries) ──
+    def _pipeline_entry(pid: str, name: str, script: str, freq: str,
+                        raw_output: str, wiki_output: str,
+                        last_run: str | None, stale_hours: float) -> dict:
+        status = _age_status(last_run, stale_hours)
+        age_h = None
+        if last_run:
+            try:
+                for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
+                    try:
+                        dt = datetime.strptime(
+                            last_run.replace("+00:00", "Z").rstrip("Z") + "Z" if "Z" not in last_run else last_run, fmt)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        age_h = round((now - dt).total_seconds() / 3600, 1)
+                        break
+                    except ValueError:
+                        continue
+            except Exception:
+                pass
+        return {
+            "id": pid, "name": name, "script": script, "freq": freq,
+            "raw_output": raw_output, "wiki_output": wiki_output,
+            "last_run": last_run, "age_hours": age_h, "status": status,
+        }
+
+    # 1. x_sync
+    xs_last = _newest_mtime_iso(raw_dir / "x-tweets") if (raw_dir / "x-tweets").is_dir() else None
+
+    # 2. platform_snapshot
     manifest = _load(wiki_dir / "tagclaw-platform" / "raw" / "manifest.json") or {}
     ps_last = manifest.get("fetched_at")
 
-    # 2. docs_ingest
+    # 3. docs_ingest
     di_last = _newest_mtime_iso(wiki_dir / "concepts") if (wiki_dir / "concepts").is_dir() else None
 
-    # 3. topic_heatmap
+    # 4. topic_heatmap
     heatmap = _load(RUNTIME / "bookmarker" / "topic-heatmap.json") or {}
     th_last = heatmap.get("generated_at")
 
-    # 4. execution_brief
+    # 5. execution_brief
     eb_last = compiled_at
 
-    # 5. social_snapshot
+    # 6. social_snapshot
     ss_path = wiki_dir / "social" / "trending.md"
     ss_last = _mtime_iso(ss_path)
 
-    # 6. lint
+    # 7. lint
     lint_path = wiki_dir / "lint" / "latest-report.md"
     lint_last = _mtime_iso(lint_path)
     lint_fm = _parse_lint_frontmatter(lint_path) if lint_path.exists() else {}
 
-    # 7. query_writebacks
+    # 8. query_writeback
     qw_last = _newest_mtime_iso(wiki_dir / "queries") if (wiki_dir / "queries").is_dir() else None
 
     ingest_pipeline = [
-        {"name": "platform_snapshot", "script": "fetch_tagclaw_platform_wiki.py", "freq": "monthly",
-         "output": "wiki/tagclaw-platform/raw/", "last_run": ps_last, "status": _age_status(ps_last, 31 * 24)},
-        {"name": "docs_ingest", "script": "wiki_ingest_docs_monthly_v1.py", "freq": "monthly",
-         "output": "wiki/concepts/", "last_run": di_last, "status": _age_status(di_last, 31 * 24)},
-        {"name": "topic_heatmap", "script": "build_wiki_topic_heatmap_v1.py", "freq": "bookmarker heartbeat",
-         "output": "runtime/bookmarker/topic-heatmap.json", "last_run": th_last, "status": _age_status(th_last, 24)},
-        {"name": "execution_brief", "script": "build_wiki_execution_brief_v1.py", "freq": "weekly",
-         "output": "runtime/shared/wiki-execution-brief.json", "last_run": eb_last, "status": _age_status(eb_last, 7 * 24)},
-        {"name": "social_snapshot", "script": "build_wiki_social_snapshot_v1.py", "freq": "weekly",
-         "output": "wiki/social/trending.md", "last_run": ss_last, "status": _age_status(ss_last, 7 * 24)},
-        {"name": "lint", "script": "wiki_lint_v1.py", "freq": "weekly",
-         "output": "wiki/lint/latest-report.md", "last_run": lint_last,
-         "status": "warn" if lint_fm.get("broken_links_count", 0) > 0 else _age_status(lint_last, 7 * 24)},
-        {"name": "query_writebacks", "script": "write_wiki_query.py", "freq": "per heartbeat",
-         "output": "wiki/queries/", "last_run": qw_last, "status": _age_status(qw_last, 2)},
+        _pipeline_entry("x_sync", "X Sync", "bird-x-sync.py", "bookmark-sync cron",
+                         "raw/x-tweets/ + raw/x-bookmarks/", "wiki/synthesis/tweets/ + wiki/synthesis/people/",
+                         xs_last, 48),
+        _pipeline_entry("platform_snapshot", "Platform Snapshot", "fetch_tagclaw_platform_wiki.py", "monthly",
+                         "—", "wiki/tagclaw-platform/raw/", ps_last, 720),
+        _pipeline_entry("docs_ingest", "Docs Ingest", "wiki_ingest_docs_monthly_v1.py", "monthly",
+                         "raw/external-docs/", "wiki/concepts/", di_last, 720),
+        _pipeline_entry("topic_heatmap", "Topic Heatmap", "build_wiki_topic_heatmap_v1.py", "bookmarker heartbeat",
+                         "raw/x-interactions/", "runtime/bookmarker/topic-heatmap.json", th_last, 24),
+        _pipeline_entry("execution_brief", "Execution Brief", "build_wiki_execution_brief_v1.py", "weekly",
+                         "—", "wiki/execution/weekly-brief.md + runtime/shared/wiki-execution-brief.json", eb_last, 168),
+        _pipeline_entry("social_snapshot", "Social Snapshot", "build_wiki_social_snapshot_v1.py", "weekly",
+                         "—", "wiki/social/trending.md", ss_last, 168),
+        _pipeline_entry("lint", "Wiki Lint", "wiki_lint_v1.py", "weekly",
+                         "—", "wiki/lint/latest-report.md", lint_last, 168),
+        _pipeline_entry("query_writeback", "Query Writeback", "write_wiki_query.py", "per heartbeat",
+                         "—", "wiki/queries/", qw_last, 4),
     ]
+
+    # Override lint status if broken links exist
+    if lint_fm.get("broken_links_count", 0) > 0:
+        ingest_pipeline[6]["status"] = "stale"
 
     # ── Agent Wiki Status ──
     def _wiki_fields(data: dict) -> dict:
@@ -195,8 +284,8 @@ def _load_wiki_status() -> dict:
         "trader": trader_latest.get("wiki") or _wiki_fields(trader_latest),
     }
 
-    # ── Lint ──
-    lint_info = {
+    # ── Lint Summary ──
+    lint_summary = {
         "generated_at": lint_fm.get("generated_at"),
         "concepts_checked": lint_fm.get("concepts_checked", 0),
         "broken_links_count": lint_fm.get("broken_links_count", 0),
@@ -205,10 +294,12 @@ def _load_wiki_status() -> dict:
     }
 
     return {
+        "raw_layer": {"subdirs": raw_subdirs, "total_files": raw_total},
+        "wiki_layer": {"subdirs": wiki_subdirs, "total_files": wiki_total},
         "execution_brief": execution_brief,
         "ingest_pipeline": ingest_pipeline,
         "agent_wiki_status": agent_wiki_status,
-        "lint": lint_info,
+        "lint": lint_summary,
     }
 
 
@@ -1051,8 +1142,8 @@ def api_status():
 
 @app.get("/api/wiki")
 def api_wiki():
-    """Dedicated Wiki System endpoint."""
-    return JSONResponse({"wiki_system": _load_wiki_status()})
+    """Full wiki system status: raw + wiki layers, ingest pipeline, agent wiki status, lint."""
+    return JSONResponse(_load_wiki_status())
 
 
 @app.get("/api/timeline")
