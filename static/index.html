@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>@clawdbot · Agent Dashboard</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260417c" />
+  <link rel="stylesheet" href="/static/style.css?v=20260413e" />
 </head>
 <body class="dev-mode">
 
@@ -41,26 +41,10 @@
   </div>
 </header>
 
-<div id="hero-summary-bar" style="display:none">
-  <span id="heroStatusDot" class="hero-status-dot">🟢</span>
-  <span id="heroStatusLabel" class="hero-status-label">—</span>
-  <span class="hero-divider">•</span>
-  <span class="hero-score">TAS <strong id="heroTasScore">—</strong><span id="heroTasTrend" class="hero-trend flat">→</span></span>
-  <span class="hero-divider">•</span>
-  <span id="heroToday" class="hero-today">—</span>
-</div>
-
-<div id="action-required-strip" style="display:none"></div>
-
+<!-- action-required-strip removed (community_heat stale warning no longer shown) -->
 <!-- ═══════════════════════════════════════════ CONTROL TOWER HEADER ══ -->
-<div id="control-tower-header" style="display:none">
-  <div class="timeline-summary-row" style="padding:.5rem 1.5rem; border-bottom:1px solid var(--border); background:#0f151c;">
-    <div class="tl-summary-pill"><span class="tsp-label">SYSTEM MODE</span><span id="ct-system-mode" class="tsp-value">—</span></div>
-    <div class="tl-summary-pill"><span class="tsp-label">PRIMARY BOTTLENECK</span><span id="ct-primary-bottleneck" class="tsp-value">—</span></div>
-    <div class="tl-summary-pill"><span class="tsp-label">HIGHEST PRIORITY</span><span id="ct-highest-priority" class="tsp-value">—</span></div>
-    <div class="tl-summary-pill"><span class="tsp-label">TAS LEVER</span><span id="ct-tas-lever" class="tsp-value">—</span></div>
-    <div class="tl-summary-pill"><span class="tsp-label">CONFIDENCE</span><span id="ct-confidence" class="tsp-value">—</span></div>
-  </div>
+<!-- Mission Status Bar slots removed (SYSTEM MODE, PRIMARY BOTTLENECK, HIGHEST PRIORITY, TAS LEVER, CONFIDENCE) -->
+<div id="control-tower-header">
   <div id="alerts-strip" class="alerts-strip">
     <span class="muted small">No active blockers</span>
   </div>
@@ -274,28 +258,6 @@
         <div id="bm-sync-at"></div><div id="bm-mode-badge"></div>
         <div id="bm-align-events"></div>
       </div>
-
-      <div class="detail-grid bookmarker-detail-grid">
-        <div class="detail-card">
-          <div class="x-section-header compact" onclick="toggleSection('bm-curation-vp')">
-            <span class="section-label-inline">Curate VP Check (24h)</span>
-            <button id="bm-curation-vp-toggle" class="x-toggle-btn">▼</button>
-          </div>
-          <div id="bm-curation-vp-collapsible" class="x-collapsible">
-            <div id="bm-curation-vp-panel" class="list-block">—</div>
-          </div>
-        </div>
-        <div class="detail-card">
-          <div class="x-section-header compact" onclick="toggleSection('bm-curation-preview')">
-            <span class="section-label-inline">Fallback Candidate Preview</span>
-            <button id="bm-curation-preview-toggle" class="x-toggle-btn">▼</button>
-          </div>
-          <div id="bm-curation-preview-collapsible" class="x-collapsible">
-            <div id="bm-curation-preview-panel" class="list-block">—</div>
-          </div>
-        </div>
-      </div>
-
       <div class="x-section-header" onclick="toggleSection('bm-pipeline')">
         <span class="section-label" data-i18n="section-social-pipeline">Social Execution Pipeline</span>
         <button id="bm-pipeline-toggle" class="x-toggle-btn">▲</button>
@@ -410,20 +372,6 @@
       <span class="muted small" data-i18n="timeline-filter-note">Completed actions only</span>
     </h2>
     <div id="timeline-summary-row" class="timeline-summary-row"></div>
-    <div class="lane-grid" style="margin:.75rem 0;">
-      <div class="lane-col">
-        <div class="lane-header lane-header-observe">Observe</div>
-        <div id="lane-observe-body" class="lane-body"><div class="muted small">Loading…</div></div>
-      </div>
-      <div class="lane-col">
-        <div class="lane-header lane-header-decide">Decide</div>
-        <div id="lane-decide-body" class="lane-body"><div class="muted small">Loading…</div></div>
-      </div>
-      <div class="lane-col">
-        <div class="lane-header lane-header-execute">Execute</div>
-        <div id="lane-execute-body" class="lane-body"><div class="muted small">Loading…</div></div>
-      </div>
-    </div>
     <div id="freshness-matrix" class="freshness-matrix-wrap"></div>
     <div id="timeline-list-wrapper" class="timeline-wrapper">
       <div id="timeline-list" class="timeline"></div>
@@ -594,6 +542,6 @@
 
 <div id="error-bar" class="error-bar hidden"></div>
 
-<script src="/static/app.js?v=20260417c"></script>
+<script src="/static/app.js?v=20260413e"></script>
 </body>
 </html>
