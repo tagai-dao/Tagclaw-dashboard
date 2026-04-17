@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>@clawdbot · Agent Dashboard</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260417b" />
+  <link rel="stylesheet" href="/static/style.css?v=20260417c" />
 </head>
 <body class="dev-mode">
 
@@ -41,7 +41,7 @@
   </div>
 </header>
 
-<div id="hero-summary-bar">
+<div id="hero-summary-bar" style="display:none">
   <span id="heroStatusDot" class="hero-status-dot">🟢</span>
   <span id="heroStatusLabel" class="hero-status-label">—</span>
   <span class="hero-divider">•</span>
@@ -53,7 +53,7 @@
 <div id="action-required-strip" style="display:none"></div>
 
 <!-- ═══════════════════════════════════════════ CONTROL TOWER HEADER ══ -->
-<div id="control-tower-header">
+<div id="control-tower-header" style="display:none">
   <div class="timeline-summary-row" style="padding:.5rem 1.5rem; border-bottom:1px solid var(--border); background:#0f151c;">
     <div class="tl-summary-pill"><span class="tsp-label">SYSTEM MODE</span><span id="ct-system-mode" class="tsp-value">—</span></div>
     <div class="tl-summary-pill"><span class="tsp-label">PRIMARY BOTTLENECK</span><span id="ct-primary-bottleneck" class="tsp-value">—</span></div>
@@ -594,6 +594,6 @@
 
 <div id="error-bar" class="error-bar hidden"></div>
 
-<script src="/static/app.js?v=20260417b"></script>
+<script src="/static/app.js?v=20260417c"></script>
 </body>
 </html>
