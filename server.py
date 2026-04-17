@@ -25,6 +25,7 @@ RUNTIME   = WORKSPACE / "runtime"
 STATIC    = Path(__file__).parent / "static"
 BOOKMARKER_WORKSPACE = WORKSPACE.parent / "workspace-bookmarker"
 BOOKMARKER_RESOURCE_STATUS = BOOKMARKER_WORKSPACE / "memory" / "tagclaw-resource-status.json"
+BOOKMARKER_TAGAI_CREDS_PATH = BOOKMARKER_WORKSPACE / "runtime" / "credentials" / "tagclaw-bookmarker.json"
 
 app = FastAPI(title="TagClaw Viz", version="1.0.0")
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -49,6 +50,15 @@ _TAGAI_CREDS_PATH = os.path.expanduser("~/.config/tagclaw/credentials.json")
 _tagai_cache: dict[str, Any] = {"op": None, "vp": None, "ts": 0.0}
 _tagai_lock = threading.Lock()
 _TAGAI_TTL = 120  # seconds
+_bookmarker_live_cache: dict[str, Any] = {
+    "op": None,
+    "vp": None,
+    "agent_name": None,
+    "username": None,
+    "ts": 0.0,
+}
+_bookmarker_live_lock = threading.Lock()
+_BOOKMARKER_LIVE_TTL = 120  # seconds
 
 _curate_preview_cache: dict[str, Any] = {"data": None, "ts": 0.0}
 _curate_preview_lock = threading.Lock()
@@ -83,6 +93,85 @@ def _fetch_live_op_vp() -> dict[str, Any]:
     except Exception:
         # On failure, return stale cache if available, else None
         return {"op": _tagai_cache.get("op"), "vp": _tagai_cache.get("vp")}
+
+
+def _fetch_bookmarker_live_op_vp() -> dict[str, Any]:
+    now = time.monotonic()
+    with _bookmarker_live_lock:
+        if now - _bookmarker_live_cache["ts"] < _BOOKMARKER_LIVE_TTL:
+            return {
+                "op": _bookmarker_live_cache.get("op"),
+                "vp": _bookmarker_live_cache.get("vp"),
+                "agent_name": _bookmarker_live_cache.get("agent_name"),
+                "username": _bookmarker_live_cache.get("username"),
+                "credentials_source": "scoped-live",
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "identity_issue": None,
+            }
+    try:
+        import requests as _req
+        if not BOOKMARKER_TAGAI_CREDS_PATH.exists():
+            return {"op": None, "vp": None, "credentials_source": "missing_scoped", "identity_issue": "missing_scoped_credentials"}
+        creds = json.loads(BOOKMARKER_TAGAI_CREDS_PATH.read_text())
+        api_key = creds.get("api_key") or creds.get("apiKey") or creds.get("token")
+        if not api_key:
+            return {"op": None, "vp": None, "credentials_source": "missing_scoped", "identity_issue": "missing_api_key"}
+        resp = _req.get(
+            f"{_TAGAI_BASE_URL}/tagclaw/me",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        agent = body.get("agent") or body.get("data", {}).get("agent", {})
+        expected_name = creds.get("expected_agent_name")
+        expected_username = creds.get("expected_username")
+        actual_name = agent.get("name")
+        actual_username = agent.get("username")
+        identity_issue = None
+        if expected_name and actual_name and actual_name != expected_name:
+            identity_issue = "agent_name_mismatch"
+        if expected_username and actual_username and actual_username != expected_username:
+            identity_issue = identity_issue or "username_mismatch"
+        if identity_issue:
+            return {
+                "op": None,
+                "vp": None,
+                "agent_name": actual_name,
+                "username": actual_username,
+                "credentials_source": "scoped-live",
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "identity_issue": identity_issue,
+            }
+        op_val = agent.get("op")
+        vp_val = agent.get("vp")
+        with _bookmarker_live_lock:
+            _bookmarker_live_cache.update({
+                "op": op_val,
+                "vp": vp_val,
+                "agent_name": actual_name,
+                "username": actual_username,
+                "ts": time.monotonic(),
+            })
+        return {
+            "op": op_val,
+            "vp": vp_val,
+            "agent_name": actual_name,
+            "username": actual_username,
+            "credentials_source": "scoped-live",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "identity_issue": None,
+        }
+    except Exception:
+        return {
+            "op": _bookmarker_live_cache.get("op"),
+            "vp": _bookmarker_live_cache.get("vp"),
+            "agent_name": _bookmarker_live_cache.get("agent_name"),
+            "username": _bookmarker_live_cache.get("username"),
+            "credentials_source": "scoped-live-cache",
+            "fetched_at": None,
+            "identity_issue": None,
+        }
 
 
 def _load_bookmarker_resource_status() -> dict[str, Any]:
@@ -2431,8 +2520,9 @@ def api_agent_health():
     }
 
     bookmarker_resource = _load_bookmarker_resource_status()
+    bookmarker_live = _fetch_bookmarker_live_op_vp()
     bookmarker_blocker = bm_blocker
-    if bookmarker_resource.get("identity_issue"):
+    if bookmarker_live.get("identity_issue") or bookmarker_resource.get("identity_issue"):
         bookmarker_blocker = "resource identity mismatch"
     elif not bookmarker_resource.get("ok"):
         bookmarker_blocker = bm_blocker or "resource status missing"
@@ -2451,13 +2541,13 @@ def api_agent_health():
             "freshness": bm_freshness,
             "blocker": bookmarker_blocker,
             "next_action": bm_next,
-            "op": bookmarker_resource.get("op"),
-            "vp": bookmarker_resource.get("vp"),
-            "resource_agent_name": bookmarker_resource.get("agent_name"),
-            "resource_username": bookmarker_resource.get("username"),
-            "resource_updated_at": bookmarker_resource.get("updated_at"),
-            "resource_credentials_source": bookmarker_resource.get("credentials_source"),
-            "resource_identity_issue": bookmarker_resource.get("identity_issue"),
+            "op": bookmarker_live.get("op") if bookmarker_live.get("op") is not None else bookmarker_resource.get("op"),
+            "vp": bookmarker_live.get("vp") if bookmarker_live.get("vp") is not None else bookmarker_resource.get("vp"),
+            "resource_agent_name": bookmarker_live.get("agent_name") or bookmarker_resource.get("agent_name"),
+            "resource_username": bookmarker_live.get("username") or bookmarker_resource.get("username"),
+            "resource_updated_at": bookmarker_live.get("fetched_at") or bookmarker_resource.get("updated_at"),
+            "resource_credentials_source": bookmarker_live.get("credentials_source") or bookmarker_resource.get("credentials_source"),
+            "resource_identity_issue": bookmarker_live.get("identity_issue") or bookmarker_resource.get("identity_issue"),
             "op_budget": (budget_alloc.get("allocations") or {}).get("bookmarker", {}).get("op_budget"),
             "vp_budget": (budget_alloc.get("allocations") or {}).get("bookmarker", {}).get("vp_budget"),
         },
