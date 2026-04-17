@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import glob
+import importlib.util
 import json
 import os
 import re
 import sys
+import threading
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
@@ -20,6 +23,8 @@ from fastapi.staticfiles import StaticFiles
 WORKSPACE = Path(__file__).parent.parent.parent  # ~/.openclaw/workspace
 RUNTIME   = WORKSPACE / "runtime"
 STATIC    = Path(__file__).parent / "static"
+BOOKMARKER_WORKSPACE = WORKSPACE.parent / "workspace-bookmarker"
+BOOKMARKER_RESOURCE_STATUS = BOOKMARKER_WORKSPACE / "memory" / "tagclaw-resource-status.json"
 
 app = FastAPI(title="TagClaw Viz", version="1.0.0")
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -36,6 +41,114 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(NoCacheMiddleware)
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+
+
+# ── Live TagAI OP/VP cache ─────────────────────────────────────────────────
+_TAGAI_BASE_URL = "https://bsc-api.tagai.fun"
+_TAGAI_CREDS_PATH = os.path.expanduser("~/.config/tagclaw/credentials.json")
+_tagai_cache: dict[str, Any] = {"op": None, "vp": None, "ts": 0.0}
+_tagai_lock = threading.Lock()
+_TAGAI_TTL = 120  # seconds
+
+_curate_preview_cache: dict[str, Any] = {"data": None, "ts": 0.0}
+_curate_preview_lock = threading.Lock()
+_CURATE_PREVIEW_TTL = 180  # seconds
+
+
+def _fetch_live_op_vp() -> dict[str, Any]:
+    """Return {"op": float|None, "vp": float|None} from TagAI API, cached."""
+    now = time.monotonic()
+    with _tagai_lock:
+        if now - _tagai_cache["ts"] < _TAGAI_TTL:
+            return {"op": _tagai_cache["op"], "vp": _tagai_cache["vp"]}
+    try:
+        import requests as _req
+        creds = json.loads(Path(_TAGAI_CREDS_PATH).read_text())
+        api_key = creds.get("api_key") or creds.get("apiKey") or creds.get("token")
+        if not api_key:
+            return {"op": None, "vp": None}
+        resp = _req.get(
+            f"{_TAGAI_BASE_URL}/tagclaw/me",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        agent = body.get("agent") or body.get("data", {}).get("agent", {})
+        op_val = agent.get("op")
+        vp_val = agent.get("vp")
+        with _tagai_lock:
+            _tagai_cache.update({"op": op_val, "vp": vp_val, "ts": time.monotonic()})
+        return {"op": op_val, "vp": vp_val}
+    except Exception:
+        # On failure, return stale cache if available, else None
+        return {"op": _tagai_cache.get("op"), "vp": _tagai_cache.get("vp")}
+
+
+def _load_bookmarker_resource_status() -> dict[str, Any]:
+    try:
+        if not BOOKMARKER_RESOURCE_STATUS.exists():
+            return {"ok": False, "error": "missing_resource_status"}
+        data = json.loads(BOOKMARKER_RESOURCE_STATUS.read_text())
+        return {
+            "ok": True,
+            "op": data.get("current_op"),
+            "vp": data.get("current_vp"),
+            "agent_name": data.get("agent_name"),
+            "username": data.get("username"),
+            "updated_at": data.get("timestamp"),
+            "identity_issue": data.get("identity_issue"),
+            "credentials_source": data.get("credentials_source"),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+
+def _load_curate_fallback_preview() -> dict[str, Any]:
+    """Preview current feed-fallback curate actions using bookmarker's live scoring logic."""
+    now_mono = time.monotonic()
+    with _curate_preview_lock:
+        if now_mono - _curate_preview_cache["ts"] < _CURATE_PREVIEW_TTL:
+            return _curate_preview_cache["data"] or {"ok": False, "candidates": [], "error": "empty_cache"}
+
+    data: dict[str, Any]
+    try:
+        creds = json.loads(Path(_TAGAI_CREDS_PATH).read_text())
+        api_key = creds.get("api_key") or creds.get("apiKey") or creds.get("token")
+        if not api_key:
+            data = {"ok": False, "candidates": [], "error": "missing_api_key"}
+        else:
+            mod_path = WORKSPACE / "scripts" / "execute_social_intent_v2.py"
+            spec = importlib.util.spec_from_file_location("execute_social_intent_v2", mod_path)
+            if not spec or not spec.loader:
+                data = {"ok": False, "candidates": [], "error": "import_spec_failed"}
+            else:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                actions = mod.scan_feed_for_curations(api_key)
+                candidates = []
+                for action in actions[:5]:
+                    inline = action.get("_inline_draft") if isinstance(action.get("_inline_draft"), dict) else {}
+                    candidates.append({
+                        "tweet_id": inline.get("tweetId"),
+                        "target_key": inline.get("target_key"),
+                        "vp": inline.get("vp"),
+                        "reason": inline.get("reason"),
+                        "source": inline.get("source"),
+                    })
+                data = {
+                    "ok": True,
+                    "candidate_count": len(actions),
+                    "candidates": candidates,
+                    "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                }
+    except Exception as e:
+        data = {"ok": False, "candidates": [], "error": str(e)}
+
+    with _curate_preview_lock:
+        _curate_preview_cache.update({"data": data, "ts": time.monotonic()})
+    return data
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -73,25 +186,63 @@ def _newest_mtime_iso(directory: Path) -> str | None:
         return None
 
 
+def _parse_dt(date_str: str | None) -> datetime | None:
+    """Parse ISO-ish datetimes robustly, preserving explicit timezone offsets."""
+    if not date_str:
+        return None
+    s = str(date_str).strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        pass
+    for fmt in ("%a %b %d %H:%M:%S +0000 %Y", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(s, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            continue
+    return None
+
+
+FRESHNESS_PROFILES: dict[str, tuple[float, float, float]] = {
+    # fresh, aging, stale cutoffs in minutes (critical beyond stale cutoff)
+    "runtime": (120, 360, 1440),
+    "dev": (30, 120, 360),
+    # Claude Dispatch is on-demand, not heartbeat-driven. Idle results should age slower.
+    "dev_idle": (720, 2880, 10080),
+    "weekly": (10080, 14400, 20160),
+    "monthly": (50400, 64800, 86400),
+    "daily": (1440, 2160, 2880),
+    # For valid_until semantics: fresh until expiry, then aging/stale/critical by overdue age.
+    "valid_until": (0, 1440, 4320),
+}
+
+
+def _bucket_from_age(age_min: float, profile: str = "runtime") -> str:
+    fresh_cutoff, aging_cutoff, stale_cutoff = FRESHNESS_PROFILES.get(profile, FRESHNESS_PROFILES["runtime"])
+    if age_min < fresh_cutoff:
+        return "fresh"
+    if age_min < aging_cutoff:
+        return "aging"
+    if age_min < stale_cutoff:
+        return "stale"
+    return "critical"
+
+
 def _age_status(date_str: str | None, max_hours: float) -> str:
     """Return 'ok', 'stale', or 'missing' based on age."""
-    if not date_str:
+    dt = _parse_dt(date_str)
+    if not dt:
         return "missing"
-    try:
-        for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S"):
-            try:
-                dt = datetime.strptime(date_str.replace("+00:00", "Z").rstrip("Z") + "Z" if "Z" not in date_str else date_str, fmt)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                break
-            except ValueError:
-                continue
-        else:
-            return "missing"
-        age = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
-        return "ok" if age < max_hours else "stale"
-    except Exception:
-        return "missing"
+    age = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+    return "ok" if age < max_hours else "stale"
 
 
 def _parse_lint_frontmatter(path: Path) -> dict:
@@ -142,6 +293,13 @@ def _dir_info(directory: Path) -> dict:
         return {"file_count": 0, "newest_file_age_hours": None}
 
 
+def _age_hours_from_iso(date_str: str | None) -> float | None:
+    dt = _parse_dt(date_str)
+    if not dt:
+        return None
+    return round((datetime.now(timezone.utc) - dt).total_seconds() / 3600, 1)
+
+
 def _load_wiki_status() -> dict:
     """Build full wiki system status for the dashboard: raw + wiki layers, ingest pipeline, agents, lint."""
     wiki_dir = WORKSPACE / "wiki"
@@ -157,6 +315,23 @@ def _load_wiki_status() -> dict:
                 info = _dir_info(child)
                 raw_subdirs[child.name] = info
                 raw_total += info["file_count"]
+
+    # For X raw dirs, freshness should reflect last successful sync, not just newest raw file mtime.
+    # Otherwise a successful sync with 0 new items misleadingly looks days old.
+    x_bundle_manifest = _load(BOOKMARKER_WORKSPACE / "memory" / "raw-x-bundle-manifest.json") or {}
+    x_modules = x_bundle_manifest.get("modules") or {}
+    x_bundle_completed = x_bundle_manifest.get("completed_at") or x_bundle_manifest.get("started_at")
+    for module_name in ("x-bookmarks", "x-tweets", "x-likes", "x-interactions"):
+        if module_name not in raw_subdirs:
+            continue
+        module_data = x_modules.get(module_name) or {}
+        state = module_data.get("state") or {}
+        age_h = _age_hours_from_iso(state.get("last_sync"))
+        if age_h is None and module_data.get("status") == "ok":
+            age_h = _age_hours_from_iso(x_bundle_completed)
+        if age_h is not None:
+            raw_subdirs[module_name]["newest_file_age_hours"] = age_h
+            raw_subdirs[module_name]["freshness_source"] = "last_sync"
 
     # ── Wiki Layer ──
     wiki_subdirs = {}
@@ -197,20 +372,9 @@ def _load_wiki_status() -> dict:
                         last_run: str | None, stale_hours: float) -> dict:
         status = _age_status(last_run, stale_hours)
         age_h = None
-        if last_run:
-            try:
-                for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
-                    try:
-                        dt = datetime.strptime(
-                            last_run.replace("+00:00", "Z").rstrip("Z") + "Z" if "Z" not in last_run else last_run, fmt)
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        age_h = round((now - dt).total_seconds() / 3600, 1)
-                        break
-                    except ValueError:
-                        continue
-            except Exception:
-                pass
+        dt = _parse_dt(last_run)
+        if dt:
+            age_h = round((now - dt).total_seconds() / 3600, 1)
         return {
             "id": pid, "name": name, "script": script, "freq": freq,
             "raw_output": raw_output, "wiki_output": wiki_output,
@@ -264,11 +428,13 @@ def _load_wiki_status() -> dict:
                          "—", "wiki/lint/latest-report.md", lint_last, 168),
         _pipeline_entry("query_writeback", "Query Writeback", "write_wiki_query.py", "per heartbeat",
                          "—", "wiki/queries/", qw_last, 4),
+        _pipeline_entry("community_heat", "Community Heat", "refresh_wiki_community_heat_v1.py", "per heartbeat",
+                         "—", "runtime/shared/community-heat.json",
+                         (_load(RUNTIME / "shared" / "community-heat.json") or {}).get("computed_at"), 6),
     ]
 
-    # Override lint status if broken links exist
-    if lint_fm.get("broken_links_count", 0) > 0:
-        ingest_pipeline[6]["status"] = "stale"
+    # Annotate lint pipeline entry with findings count (separate from run-staleness)
+    ingest_pipeline[6]["has_findings"] = lint_fm.get("broken_links_count", 0) > 0
 
     # ── Agent Wiki Status ──
     def _wiki_fields(data: dict) -> dict:
@@ -285,13 +451,82 @@ def _load_wiki_status() -> dict:
     }
 
     # ── Lint Summary ──
+    # Prefer JSON artifact (has health_score); fall back to frontmatter
+    lint_json = _load(RUNTIME / "shared" / "wiki-lint-status.json") or {}
     lint_summary = {
-        "generated_at": lint_fm.get("generated_at"),
+        "generated_at": lint_json.get("generated_at") or lint_fm.get("generated_at"),
         "concepts_checked": lint_fm.get("concepts_checked", 0),
-        "broken_links_count": lint_fm.get("broken_links_count", 0),
-        "stale_count": lint_fm.get("stale_count", 0),
-        "orphan_count": lint_fm.get("orphan_count", 0),
+        "broken_links_count": lint_json.get("broken_links_count", lint_fm.get("broken_links_count", 0)),
+        "stale_count": lint_json.get("stale_count", lint_fm.get("stale_count", 0)),
+        "orphan_count": lint_json.get("orphan_count", lint_fm.get("orphan_count", 0)),
+        "empty_count": lint_json.get("empty_count", lint_fm.get("empty_count", 0)),
+        "health_score": lint_json.get("health_score"),
     }
+
+    # ── Community Heat ──
+    heat_data = _load(RUNTIME / "shared" / "community-heat.json") or {}
+    heat_ticks = heat_data.get("ticks", {})
+    community_heat = {
+        "computed_at": heat_data.get("computed_at"),
+        "version": heat_data.get("version"),
+        "source_health": heat_data.get("source_health", "unavailable"),
+        "top_rising": heat_data.get("top_rising", []),
+        "top_declining": heat_data.get("top_declining", []),
+        "ticks": {
+            tick: {
+                "trend": v.get("trend"),
+                "trend_score": v.get("trend_score"),
+                "trending_rank": v.get("trending_rank"),
+                "market_cap_rank": v.get("market_cap_rank"),
+                "trend_basis": v.get("trend_basis"),
+                "heat_rank": v.get("heat_rank"),
+                "social_score": v.get("social_score"),
+                "trade_score": v.get("trade_score"),
+                "composite_score": v.get("composite_score"),
+                "social_momentum": v.get("social_momentum"),
+                "trade_momentum": v.get("trade_momentum"),
+                "data_coverage": v.get("data_coverage"),
+                "social_posts_24h": v.get("social_posts_24h"),
+                "trade_count_24h": v.get("trade_count_24h"),
+            }
+            for tick, v in heat_ticks.items()
+        },
+    }
+
+    # ── PoB Unclaimed ──
+    trader_tas = _load(RUNTIME / "trader" / "tas-trade.json") or {}
+    pob_unclaimed_usd = trader_tas.get("claimable_usd_raw")
+    pob_norm = trader_tas.get("claimable_usd_norm")
+
+    # ── Contract Verifier Health (P2) ──
+    verify_path = RUNTIME / "shared" / "wiki-contract-verify.json"
+    verify_data = _load(verify_path) or {}
+    verify_mtime = _mtime_iso(verify_path)
+    verify_age_h = None
+    if verify_mtime:
+        dt = _parse_dt(verify_mtime)
+        if dt:
+            verify_age_h = round((now - dt).total_seconds() / 3600, 1)
+
+    # Extract top failing checks for operator visibility
+    failing_checks = []
+    for c in (verify_data.get("checks") or []):
+        if not c.get("ok"):
+            failing_checks.append(c.get("check", "unknown"))
+
+    contract_health = {
+        "status": verify_data.get("status", "unknown"),
+        "pass": verify_data.get("pass", 0),
+        "fail": verify_data.get("fail", 0),
+        "verified_at": verify_data.get("verified_at"),
+        "age_hours": verify_age_h,
+        "top_failures": failing_checks[:5],
+    }
+
+    # ── Contract Alert (P4) ──
+    alert_data = _load(RUNTIME / "shared" / "wiki-contract-alert.json") or {}
+    contract_health["alert_severity"] = alert_data.get("severity", "unknown")
+    contract_health["alert_message"] = alert_data.get("message", "")
 
     return {
         "raw_layer": {"subdirs": raw_subdirs, "total_files": raw_total},
@@ -300,6 +535,10 @@ def _load_wiki_status() -> dict:
         "ingest_pipeline": ingest_pipeline,
         "agent_wiki_status": agent_wiki_status,
         "lint": lint_summary,
+        "community_heat": community_heat,
+        "contract_health": contract_health,
+        "pob_unclaimed_usd": pob_unclaimed_usd,
+        "pob_norm": pob_norm,
     }
 
 
@@ -338,6 +577,21 @@ def _split_social_actions(items: list[dict[str, Any]] | None) -> dict[str, list[
     return grouped
 
 
+def _main_control_feedback(items: list[dict[str, Any]] | None, social_intent: dict | None) -> list[dict[str, Any]]:
+    """Prefer bookmarker feedback tied to the current main social-intent cycle/strategy."""
+    events = [ev for ev in (items or []) if isinstance(ev, dict)]
+    if not events:
+        return []
+    cycle_id = str((social_intent or {}).get("cycle_id") or "")
+    strategy_id = str((social_intent or {}).get("strategy_id") or "")
+    matched = [
+        ev for ev in events
+        if (cycle_id and str(ev.get("cycle_id") or "") == cycle_id)
+        or (strategy_id and str(ev.get("strategy_id") or "") == strategy_id)
+    ]
+    return list(reversed((matched or events)[-20:]))
+
+
 def _to_float(v: Any) -> float | None:
     try:
         if v is None or v == "" or str(v).lower() == "partial":
@@ -347,7 +601,111 @@ def _to_float(v: Any) -> float | None:
         return None
 
 
-def _load_tas_history(limit: int = 50) -> list[dict[str, Any]]:
+def _to_int(value: Any) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _build_curation_vp_panel(social_hist: dict[str, Any] | None, hours: int = 24) -> dict[str, Any]:
+    now_dt = datetime.now(timezone.utc)
+    cutoff = now_dt - timedelta(hours=hours)
+    items = (social_hist or {}).get("items") if isinstance((social_hist or {}).get("items"), list) else []
+
+    rows: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "curate":
+            continue
+        if item.get("result_status") not in {"ok", "noop"}:
+            continue
+        ts = _parse_dt(item.get("executed_at") or item.get("curated_at") or item.get("ts"))
+        if not ts or ts < cutoff:
+            continue
+        request = item.get("request") if isinstance(item.get("request"), dict) else {}
+        vp = _to_int(item.get("vp_spent"))
+        if vp is None:
+            vp = _to_int(item.get("vp"))
+        if vp is None:
+            vp = _to_int(request.get("vp"))
+        reason = str(item.get("note") or request.get("reason") or "").strip()
+        rows.append({
+            "executed_at": item.get("executed_at") or item.get("curated_at") or item.get("ts"),
+            "target_key": item.get("target_key"),
+            "tweet_id": request.get("tweetId") or request.get("tweet_id"),
+            "vp": vp,
+            "reason": reason,
+            "cycle_id": item.get("cycle_id"),
+            "strategy_id": item.get("strategy_id"),
+        })
+
+    buckets = []
+    vp_values = [int(r["vp"]) for r in rows if r.get("vp") is not None]
+    total = len(rows)
+    for vp in range(1, 11):
+        count = sum(1 for v in vp_values if v == vp)
+        buckets.append({
+            "vp": vp,
+            "count": count,
+            "share_pct": round((count / total) * 100, 1) if total else 0.0,
+        })
+
+    unknown_vp = sum(1 for r in rows if r.get("vp") is None)
+    total_vp = round(sum(vp_values), 2)
+    avg_vp = round(total_vp / len(vp_values), 2) if vp_values else None
+    non_one_count = sum(1 for v in vp_values if v > 1)
+
+    return {
+        "window_hours": hours,
+        "total_curations": total,
+        "known_vp_curations": len(vp_values),
+        "unknown_vp_curations": unknown_vp,
+        "total_vp_spent": total_vp,
+        "avg_vp": avg_vp,
+        "max_vp": max(vp_values) if vp_values else None,
+        "min_vp": min(vp_values) if vp_values else None,
+        "non_one_count": non_one_count,
+        "non_one_share_pct": round((non_one_count / len(vp_values)) * 100, 1) if vp_values else 0.0,
+        "unique_levels": sorted(set(vp_values)),
+        "buckets": buckets,
+        "recent": list(reversed(rows[-8:])),
+    }
+
+
+def _load_strategy_ledger() -> dict[str, dict[str, Any]]:
+    ledger_path = WORKSPACE / "runtime" / "shared" / "strategy-ledger.jsonl"
+    out: dict[str, dict[str, Any]] = {}
+    if not ledger_path.exists():
+        return out
+    try:
+        for line in ledger_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            cycle_id = obj.get("cycle_id") or obj.get("generated_at")
+            if not cycle_id:
+                continue
+            out[cycle_id] = {
+                "strategy_id": obj.get("strategy_id"),
+                "strategy_action": obj.get("strategy_action"),
+                "planning_focus": obj.get("planning_focus"),
+                "target_metrics": obj.get("target_metrics") or [],
+                "confidence": _to_float(obj.get("confidence")),
+            }
+    except Exception:
+        return {}
+    return out
+
+
+def _load_tas_history(limit: int = 50, strategy_cycle_count: int | None = None, last_cycle_id: str | None = None) -> list[dict[str, Any]]:
     points: list[dict[str, Any]] = []
 
     # Source 1: canonical JSONL (dense, per-cycle) — preferred
@@ -366,6 +724,10 @@ def _load_tas_history(limit: int = 50) -> list[dict[str, Any]]:
                             "tas_total": _to_float(obj.get("tas_total")),
                             "tas_social": _to_float(obj.get("tas_social")),
                             "tas_trade": _to_float(obj.get("tas_trade")),
+                            "cycle_count": _to_int(obj.get("cycle_count")),
+                            # P3 2026-04-10: pass status metadata for chart rendering
+                            "status": obj.get("status", "ok"),
+                            "history_eligible": obj.get("history_eligible", True),
                         })
                 except Exception:
                     continue
@@ -389,6 +751,7 @@ def _load_tas_history(limit: int = 50) -> list[dict[str, Any]]:
                             "tas_total": _to_float(parts[2]),
                             "tas_social": _to_float(parts[3]),
                             "tas_trade": _to_float(parts[5]),
+                            "cycle_count": None,
                         })
                         continue
 
@@ -399,6 +762,7 @@ def _load_tas_history(limit: int = 50) -> list[dict[str, Any]]:
                             "tas_total": _to_float(parts[5]),
                             "tas_social": _to_float(parts[3]),
                             "tas_trade": _to_float(parts[4]),
+                            "cycle_count": None,
                         })
                         continue
 
@@ -409,6 +773,7 @@ def _load_tas_history(limit: int = 50) -> list[dict[str, Any]]:
                             "tas_total": _to_float(parts[3].split("=", 1)[1]),
                             "tas_social": None,
                             "tas_trade": None,
+                            "cycle_count": None,
                         })
             except Exception:
                 pass
@@ -419,6 +784,27 @@ def _load_tas_history(limit: int = 50) -> list[dict[str, Any]]:
         if p.get("ts"):
             seen[p["ts"]] = p
     points = sorted(seen.values(), key=lambda x: x["ts"])
+
+    # Precise cycle_count backfill for the current experiment window:
+    # anchor at strategy_experiment.last_cycle_id and walk backward exactly once per TAS point.
+    if points and strategy_cycle_count and last_cycle_id:
+        anchor_idx = next((i for i, p in enumerate(points) if p.get("ts") == last_cycle_id), None)
+        if anchor_idx is not None:
+            cycle_no = strategy_cycle_count
+            idx = anchor_idx
+            while idx >= 0 and cycle_no >= 1:
+                if points[idx].get("cycle_count") is None:
+                    points[idx]["cycle_count"] = cycle_no
+                idx -= 1
+                cycle_no -= 1
+
+    # Join per-cycle strategy metadata for dashboard drill-down.
+    strategy_ledger = _load_strategy_ledger()
+    if strategy_ledger:
+        for p in points:
+            meta = strategy_ledger.get(p.get("ts") or "")
+            if meta:
+                p.update(meta)
 
     return points[-limit:]
 
@@ -944,17 +1330,20 @@ def _build_bookmarker_social_pipeline(
 
 def _build_main_social_pipeline(
     social_intent: dict, last_decision: dict,
-    main_history_items: list[dict[str, Any]] | None = None,
+    bookmarker_feedback_items: list[dict[str, Any]] | None = None,
+    curate_effectiveness: dict[str, Any] | None = None,
 ) -> dict:
-    """Build main agent social execution pipeline summary for dashboard (4-step v2)."""
-    # Step 1: Gate Checks (7 items)
+    """Build main agent social control-plane summary for dashboard.
+
+    Main no longer executes social actions directly. This panel must therefore describe
+    authorization / handoff / feedback, never an execution path owned by main.
+    """
     meta = social_intent.get("meta") or {}
     gate_checks = meta.get("gate_checks") or {}
     gates_total = len(gate_checks)
     gates_pass = sum(1 for v in gate_checks.values() if v)
     gate_status = "unknown" if not gates_total else ("pass" if gates_pass == gates_total else ("partial" if gates_pass else "blocked"))
 
-    # Step 2: Social Intent
     payload = social_intent.get("payload") or {}
     authorized = payload.get("authorized", False)
     intent_status = social_intent.get("status", "—")
@@ -965,12 +1354,18 @@ def _build_main_social_pipeline(
         at = a.get("type", "unknown")
         action_types[at] = action_types.get(at, 0) + 1
 
-    # Step 3: CLI Wrapper (descriptive — main social actions go via scripts/main_social_action.py)
-
-    # Step 4: Decision & History
     social_decision = last_decision.get("social_decision", "—")
     ld_reason = last_decision.get("reason", "")
-    main_action_count = len(main_history_items or [])
+    feedback_items = bookmarker_feedback_items or []
+    curate_effectiveness = curate_effectiveness or {}
+    conclusions = curate_effectiveness.get("conclusions") or {}
+    best_patterns = conclusions.get("best_patterns") or {}
+    worst_patterns = conclusions.get("worst_patterns") or {}
+    effectiveness_status = conclusions.get("status") or "unknown"
+    ok_count = sum(1 for item in feedback_items if item.get("result_status") == "ok")
+    noop_count = sum(1 for item in feedback_items if item.get("result_status") == "noop")
+    blocked_count = sum(1 for item in feedback_items if item.get("result_status") == "blocked")
+    feedback_status = "unknown" if not feedback_items else ("blocked" if blocked_count and not (ok_count or noop_count) else ("partial" if blocked_count else "ok"))
 
     return {
         "steps": [
@@ -982,7 +1377,7 @@ def _build_main_social_pipeline(
             },
             {
                 "id": "social_intent",
-                "label": "Social Intent",
+                "label": "Intent Draft",
                 "status": intent_status,
                 "data": {
                     "authorized": authorized,
@@ -992,23 +1387,40 @@ def _build_main_social_pipeline(
                 },
             },
             {
-                "id": "cli_wrapper",
-                "label": "CLI Wrapper",
-                "status": "active",
+                "id": "handoff_plane",
+                "label": "Handoff to Bookmarker",
+                "status": "active" if authorized else "hold",
                 "data": {
-                    "script": "scripts/main_social_action.py",
-                    "actor": "main",
-                    "records_to": "social-history.json",
+                    "target_agent": social_intent.get("target_agent") or "bookmarker",
+                    "intent_ref": "runtime/main/social-intent.json",
+                    "budget_ref": meta.get("budget_ref") or "runtime/shared/budget-allocation.json",
+                    "owner": (payload.get("budget_slice") or {}).get("execution_owner") or social_intent.get("target_agent") or "bookmarker",
                 },
             },
             {
-                "id": "decision_history",
-                "label": "Decision & History",
-                "status": social_decision,
+                "id": "feedback_loop",
+                "label": "Bookmarker Feedback",
+                "status": feedback_status,
                 "data": {
                     "social_decision": social_decision,
                     "reason": ld_reason[:120],
-                    "main_action_count": main_action_count,
+                    "feedback_count": len(feedback_items),
+                    "ok_count": ok_count,
+                    "noop_count": noop_count,
+                    "blocked_count": blocked_count,
+                },
+            },
+            {
+                "id": "curate_effectiveness",
+                "label": "Curate Effectiveness",
+                "status": effectiveness_status,
+                "data": {
+                    "summary": conclusions.get("summary"),
+                    "totals": curate_effectiveness.get("totals") or {},
+                    "best_source": best_patterns.get("source"),
+                    "worst_source": worst_patterns.get("source"),
+                    "best_heat_tick": best_patterns.get("heat_tick"),
+                    "worst_heat_tick": worst_patterns.get("heat_tick"),
                 },
             },
         ],
@@ -1026,6 +1438,54 @@ def index():
     return resp
 
 
+def _build_dev_dispatch(dev_status: dict, dev_result: dict, dev_task: dict,
+                        dev_stage: dict, dev_backlog: dict, dev_roi: dict) -> dict:
+    """Build dev_dispatch payload with explicit task identity and consistency flags.
+
+    Source-of-truth precedence:
+      1. If status.status == "running" → current_task from task.json is the primary context.
+      2. Otherwise → latest_result from result.json is the primary context.
+      3. stage_status and dispatch_roi are included with their own task_ids so the
+         client can detect mismatches rather than silently merging them.
+    """
+    is_running = (dev_status.get("status") or "").lower() == "running"
+
+    result_task_id = dev_result.get("task_id")
+    task_task_id = dev_task.get("task_id")
+    stage_task_id = dev_stage.get("task_id")
+    roi_task_id = dev_roi.get("task_id")
+
+    # Determine the "active" task_id: current task if running, else latest result
+    active_task_id = task_task_id if is_running else result_task_id
+
+    return {
+        "status": dev_status,
+        "result": dev_result,
+        "stage_status": dev_stage,
+        "backlog": dev_backlog,
+        "dispatch_roi": dev_roi,
+        # Explicit current-task context (only meaningful when running)
+        "current_task": {
+            "task_id": task_task_id,
+            "title": dev_task.get("title"),
+            "task_type": dev_task.get("task_type"),
+            "priority": dev_task.get("priority"),
+            "created_at": dev_task.get("created_at"),
+        } if is_running and task_task_id else None,
+        # Task identity fields for client-side consistency checks
+        "task_identity": {
+            "is_running": is_running,
+            "active_task_id": active_task_id,
+            "result_task_id": result_task_id,
+            "task_task_id": task_task_id,
+            "stage_task_id": stage_task_id,
+            "roi_task_id": roi_task_id,
+            "stage_matches_active": stage_task_id == active_task_id if (stage_task_id and active_task_id) else None,
+            "roi_matches_active": roi_task_id == active_task_id if (roi_task_id and active_task_id) else None,
+        },
+    }
+
+
 @app.get("/api/status")
 def api_status():
     """Aggregate snapshot of all three agents."""
@@ -1033,6 +1493,7 @@ def api_status():
     # ── Shared / health ──
     runtime_status = _safe("shared/runtime-status.json") or {}
     health         = _safe("main/runtime-health.json")   or {}
+    strategy_exp   = _safe("shared/strategy-experiment.json") or {}
 
     # ── Main ──
     input_pkt    = _safe("main/input-packet.json")   or {}
@@ -1040,6 +1501,7 @@ def api_status():
     last_dec     = _safe("main/last-decision.json")  or {}
     strategy_plan = _safe("main/strategy-plan.json") or {}
     social_int   = _safe("main/social-intent.json")  or {}
+    curate_effectiveness = _safe("main/curate-target-effectiveness.json") or {}
     budget_alloc = _safe("shared/budget-allocation.json") or {}
     attribution  = _safe("shared/latest-attribution.json") or {}
 
@@ -1054,6 +1516,8 @@ def api_status():
     social_drafts = _safe("bookmarker/social-drafts.json")      or {}
     bm_exec      = _safe("bookmarker/social-execution.json")    or {}
     write_state  = _safe("shared/social-write-state.json")      or {}
+    tas_social_data = _safe("bookmarker/tas-social.json")       or {}
+    tas_social_main = _safe("main/tas-social.json")              or {}
 
     # ── Trader ──
     wallet   = _safe("trader/wallet-snapshot.json") or {}
@@ -1068,6 +1532,7 @@ def api_status():
     # ── Claude Dispatch / Dev ──
     dev_status = _safe("dev/status.json") or {}
     dev_result = _safe("dev/result.json") or {}
+    dev_task   = _safe("dev/task.json") or {}
     dev_stage  = _safe("dev/stage-status.json") or {}
     dev_backlog = _safe("dev/backlog.json") or {}
     dev_roi = _safe("dev/dispatch-roi.json") or {}
@@ -1077,8 +1542,15 @@ def api_status():
         del wallet["private_key"]
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    live_resources = _fetch_live_op_vp()
 
-    tas_history = _load_tas_history(limit=50)
+    # Serve enough TAS points for the 7-day sparkline window.
+    # At 30-min cadence this needs ~336 points; use 400 for headroom.
+    tas_history = _load_tas_history(
+        limit=400,
+        strategy_cycle_count=_to_int(strategy_exp.get("cycle_count")),
+        last_cycle_id=strategy_exp.get("last_cycle_id"),
+    )
 
     return JSONResponse({
         "fetched_at": now_utc,
@@ -1091,10 +1563,12 @@ def api_status():
             "last_decision":  last_dec,
             "strategy_plan":  strategy_plan,
             "budget_allocation": budget_alloc,
+            "live_resources": live_resources,
             "latest_attribution": attribution,
             "social_intent":  social_int,
-            "social_actions": list(reversed((social_split.get("main") or [])[-20:])),
-            "social_pipeline": _build_main_social_pipeline(social_int, last_dec, social_split.get("main") or []),
+            "curate_effectiveness": curate_effectiveness,
+            "social_actions": _main_control_feedback(social_split.get("bookmarker") or [], social_int),
+            "social_pipeline": _build_main_social_pipeline(social_int, last_dec, _main_control_feedback(social_split.get("bookmarker") or [], social_int), curate_effectiveness),
         },
         "bookmarker": {
             "topic_brief":          topic_brief,
@@ -1102,6 +1576,7 @@ def api_status():
             "content_candidates":   bm_cands,
             "topic_performance":    bm_topic_perf,
             "autonomy_intent":      auto_intent,
+            "live_resources":       live_resources,
             "social_drafts":        social_drafts,
             "social_actions":       list(reversed((social_split.get("bookmarker") or [])[-20:])),
             "social_pipeline":      _build_bookmarker_social_pipeline(
@@ -1109,6 +1584,8 @@ def api_status():
                 auto_intent, social_drafts, bm_exec, write_state,
                 main_social_intent=social_int, main_last_decision=last_dec,
             ),
+            "curation_vp_24h":      _build_curation_vp_panel(social_hist, hours=24),
+            "curation_fallback_preview": _load_curate_fallback_preview(),
             "x_posts":              (_xp := _parse_x_tweets(hours=24, limit=20)),
             "x_posts_window":       "24h" if _xp and _xp[0].get("date") and
                                     _is_within_hours(_xp[0].get("date",""), 24) else "recent",
@@ -1117,6 +1594,30 @@ def api_status():
                                     _is_within_hours(_xb[0].get("date",""), 24) else "recent",
             **_load_x_sync(),
             "twin_recognition": _load_twin_recognition(),
+            "tas_social_detail": {
+                "align_score":         tas_social_data.get("align_score"),
+                "community_score":     tas_social_data.get("community_score"),
+                "pob_reward_score":    tas_social_data.get("pob_reward_score"),
+                "pob_claimable_usd":   tas_social_data.get("pob_claimable_usd"),
+                "value":               tas_social_data.get("value"),
+                "updated_at":          tas_social_data.get("updated_at"),
+                "strategy_action":     tas_social_data.get("strategy_action"),
+                "planning_focus":      tas_social_data.get("planning_focus"),
+                "formula":             tas_social_data.get("formula"),
+                "community_signals":   tas_social_data.get("community_signals"),
+                "community_source":    tas_social_data.get("community_source"),
+                "track_b_detail":      tas_social_data.get("track_b_detail"),
+                "curate_reward_usd":   tas_social_data.get("curate_reward_usd"),
+                "curate_reward_score": tas_social_data.get("curate_reward_score"),
+                "creator_reward_usd":  tas_social_data.get("creator_reward_usd"),
+                "creator_reward_score": tas_social_data.get("creator_reward_score"),
+                "track_a_detail":      tas_social_data.get("track_a_detail"),
+                "track_c_detail":      tas_social_data.get("track_c_detail"),
+                "comparison":          tas_social_data.get("comparison"),
+                "eligible_posts":      (tas_social_main.get("inputs") or {}).get("eligible_posts"),
+                "align_signals":       tas_social_data.get("track_a_detail", {}).get("raw_align") if tas_social_data.get("track_a_detail") else (tas_social_main.get("inputs") or {}).get("align_signals"),
+                "post_interaction_details": (tas_social_main.get("inputs") or {}).get("post_interaction_details"),
+            },
         },
         "trader": {
             "wallet_snapshot":   wallet,
@@ -1129,13 +1630,7 @@ def api_status():
             "measurement_quality": measurement_quality,
             "trade_actions":     _load_trade_actions(limit=20),
         },
-        "dev_dispatch": {
-            "status": dev_status,
-            "result": dev_result,
-            "stage_status": dev_stage,
-            "backlog": dev_backlog,
-            "dispatch_roi": dev_roi,
-        },
+        "dev_dispatch": _build_dev_dispatch(dev_status, dev_result, dev_task, dev_stage, dev_backlog, dev_roi),
         "wiki_system": _load_wiki_status(),
     })
 
@@ -1144,6 +1639,130 @@ def api_status():
 def api_wiki():
     """Full wiki system status: raw + wiki layers, ingest pipeline, agent wiki status, lint."""
     return JSONResponse(_load_wiki_status())
+
+
+@app.get("/api/explainability")
+def api_explainability():
+    """Artifact explainability surface: state, provenance, recent events, health context."""
+    now = datetime.now(timezone.utc)
+
+    # ── Artifact catalog with provenance ──
+    ARTIFACTS = [
+        ("wiki-execution-brief.json", "Execution Brief", ["compiled_at", "valid_until", "schema"]),
+        ("community-heat.json", "Community Heat", ["computed_at", "source_health", "schema"]),
+        ("wiki-contract-verify.json", "Contract Verify", ["verified_at", "status", "pass", "fail", "schema"]),
+        ("wiki-maintenance-report.json", "Maintenance Report", ["generated_at", "overall_status", "schema"]),
+        ("wiki-lint-status.json", "Wiki Lint", ["generated_at", "health_score", "needs_attention"]),
+        ("wiki-contract-alert.json", "Contract Alert", ["severity", "action", "message"]),
+        ("wiki-maintenance-alert.json", "Maintenance Alert", ["severity", "action", "message"]),
+    ]
+    artifacts = []
+    for filename, label, meta_keys in ARTIFACTS:
+        path = RUNTIME / "shared" / filename
+        raw_path = f"runtime/shared/{filename}"
+        entry: dict[str, Any] = {"filename": filename, "label": label, "exists": path.exists(), "raw_path": raw_path}
+        if path.exists():
+            data = _load(path)
+            if data:
+                meta = {}
+                for k in meta_keys:
+                    if k in data:
+                        meta[k] = data[k]
+                entry["meta"] = meta
+                # Include all top-level keys for detail expansion (exclude large nested)
+                detail = {}
+                for k, v in data.items():
+                    if isinstance(v, (str, int, float, bool, type(None))):
+                        detail[k] = v
+                    elif isinstance(v, list) and len(v) <= 5:
+                        detail[k] = v
+                entry["detail"] = detail
+                # Compute age
+                ts = (data.get("verified_at") or data.get("generated_at")
+                      or data.get("compiled_at") or data.get("computed_at"))
+                dt = _parse_dt(ts)
+                if dt:
+                    entry["age_hours"] = round((now - dt).total_seconds() / 3600, 1)
+                    entry["timestamp"] = ts
+            # Provenance sidecar
+            sidecar = path.parent / f"{path.name}.provenance.json"
+            sidecar_path = f"runtime/shared/{path.name}.provenance.json"
+            if sidecar.exists():
+                prov = _load(sidecar)
+                if prov:
+                    entry["provenance"] = {
+                        "producer": prov.get("producer"),
+                        "generated_at": prov.get("generated_at"),
+                        "source_refs": prov.get("source_refs"),
+                        "raw_path": sidecar_path,
+                    }
+        artifacts.append(entry)
+
+    # ── Recent events from ledger ──
+    events_path = RUNTIME / "shared" / "wiki-events.jsonl"
+    events: list[dict] = []
+    if events_path.exists():
+        try:
+            lines = events_path.read_text(encoding="utf-8").strip().splitlines()
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                    events.append({
+                        "ts": e.get("ts"),
+                        "event_type": e.get("event_type"),
+                        "producer": e.get("producer"),
+                        "artifact": e.get("artifact"),
+                        "status": e.get("status"),
+                        "summary": e.get("summary"),
+                    })
+                except json.JSONDecodeError:
+                    continue
+                if len(events) >= 15:
+                    break
+        except Exception:
+            pass
+
+    # ── Health context ──
+    alert = _load(RUNTIME / "shared" / "wiki-contract-alert.json") or {}
+    maint_alert = _load(RUNTIME / "shared" / "wiki-maintenance-alert.json") or {}
+    lint = _load(RUNTIME / "shared" / "wiki-lint-status.json") or {}
+
+    contract_ok = alert.get("status") == "ok" and alert.get("severity") == "clear"
+    maint_ok = maint_alert.get("severity") == "clear"
+    lint_ok = not lint.get("needs_attention")
+
+    health = {
+        "overall": "ok" if (contract_ok and maint_ok and lint_ok) else "degraded",
+        "contract": {"status": alert.get("status", "unknown"), "severity": alert.get("severity", "unknown")},
+        "maintenance": {"severity": maint_alert.get("severity", "unknown"), "action": maint_alert.get("action", "unknown")},
+        "lint": {"health_score": lint.get("health_score"), "needs_attention": lint.get("needs_attention")},
+    }
+
+    return JSONResponse({
+        "artifacts": artifacts,
+        "recent_events": events,
+        "health": health,
+        "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    })
+
+
+def _timeline_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        parts = [str(v).strip() for v in value if str(v).strip()]
+        return " · ".join(parts)
+    if isinstance(value, dict):
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except Exception:
+            return str(value)
+    return str(value).strip()
 
 
 @app.get("/api/timeline")
@@ -1166,7 +1785,7 @@ def api_timeline():
         # Build a readable note: type + target tweet id + optional note
         req = ev.get("request") or {}
         vp = req.get("vp")
-        note_str = ev.get("note") or ""
+        note_str = _timeline_text(ev.get("note"))
         if not note_str and target:
             tid = target.split(":")[-1] if ":" in target else target
             note_str = f"{tid[:12]}"
@@ -1218,7 +1837,7 @@ def api_timeline():
             "source": "bookmarker",
             "type":   ev.get("type", "?"),
             "status": ev.get("result_status", "ok"),
-            "note":   ev.get("note") or ev.get("target_key", ""),
+            "note":   _timeline_text(ev.get("note") or ev.get("target_key", "")),
             "detail": ev,
         })
     # Bookmarker exec cycle — only if summary.succeeded > 0
@@ -1235,7 +1854,7 @@ def api_timeline():
                 "source": "bookmarker",
                 "type":   "exec_cycle",
                 "status": bm_exec.get("status", ""),
-                "note":   bm_exec.get("notes") or str(summary),
+                "note":   _timeline_text(bm_exec.get("notes") or summary),
                 "detail": {k: v for k, v in bm_exec.items() if k != "results"},
             })
 
@@ -1261,7 +1880,7 @@ def api_timeline():
             "source": "main",
             "type":   "decision",
             "status": "",
-            "note":   main_dec.get("reason") or f"social:{social} treasury:{treasury}",
+            "note":   _timeline_text(main_dec.get("reason")) or f"social:{social} treasury:{treasury}",
             "detail": main_dec,
         })
 
@@ -1297,7 +1916,74 @@ def api_timeline():
             seen.add(uid)
             deduped.append(it)
 
-    return JSONResponse({"items": deduped[:50], "total": len(deduped)})
+    # ── Build summary (24h window) ──
+    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    posts_24h = 0
+    curations_24h = 0
+    claims_24h = 0
+    blocked_24h = 0
+    agent_action_count: dict[str, int] = {}
+    last_success_at: str | None = None
+
+    # Count from social history (all items, not just deduped timeline)
+    social_data = _safe("shared/social-history.json") or {}
+    for ev in (social_data.get("items") or []):
+        ts_str = ev.get("executed_at") or ev.get("ts") or ""
+        try:
+            ev_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if ev_dt < cutoff_24h:
+            continue
+        ev_type = str(ev.get("type") or "").lower()
+        result_status = str(ev.get("result_status") or "").lower()
+        if result_status in ("noop", "failed", "blocked", "skipped"):
+            blocked_24h += 1
+            continue
+        if ev_type in ("post", "tweet"):
+            posts_24h += 1
+        elif ev_type in ("curation", "vote", "repost"):
+            curations_24h += 1
+        actor = _classify_social_actor(ev)
+        agent_action_count[actor] = agent_action_count.get(actor, 0) + 1
+        if not last_success_at or ts_str > last_success_at:
+            last_success_at = ts_str
+
+    # Count trade claims
+    today = datetime.now(timezone.utc).date()
+    for delta in range(2):
+        d = today - timedelta(days=delta)
+        path = RUNTIME / "trader" / f"executions-{d}.json"
+        rec = _load(path) or {}
+        for ev in (rec.get("items") or []):
+            if not _trader_ev_is_real(ev):
+                continue
+            ts_str = ev.get("ts") or ""
+            try:
+                ev_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if ev_dt < cutoff_24h:
+                continue
+            action = str(ev.get("action") or "").lower()
+            if action == "claim":
+                claims_24h += 1
+            agent_action_count["trader"] = agent_action_count.get("trader", 0) + 1
+            if not last_success_at or ts_str > last_success_at:
+                last_success_at = ts_str
+
+    dominant_agent = max(agent_action_count, key=agent_action_count.get) if agent_action_count else "none"
+
+    summary = {
+        "posts_24h": posts_24h,
+        "curations_24h": curations_24h,
+        "claims_24h": claims_24h,
+        "blocked_24h": blocked_24h,
+        "dominant_agent": dominant_agent,
+        "last_success_at": last_success_at,
+    }
+
+    return JSONResponse({"items": deduped[:50], "total": len(deduped), "summary": summary})
 
 
 @app.get("/api/runtime/{agent}/{file}")
@@ -1311,6 +1997,842 @@ def api_runtime_file(agent: str, file: str):
     if data is None:
         raise HTTPException(status_code=404, detail=f"File not found: {path.relative_to(WORKSPACE)}")
     return JSONResponse(data)
+
+
+@app.get("/api/autoresearch")
+def api_autoresearch():
+    """Merged summary of strategy-experiment.json + skill-manifest.json for AutoResearch loop."""
+    se = _load(RUNTIME / "shared" / "strategy-experiment.json") or {}
+    sm = _load(RUNTIME / "main" / "skill-manifest.json") or {}
+
+    # Strategy experiment summary
+    track_a = se.get("track_a") or {}
+    track_b = se.get("track_b") or {}
+    arm_history_a = track_a.get("arm_history") or []
+    arm_history_b = track_b.get("arm_history") or []
+    recent_a = arm_history_a[-5:] if arm_history_a else []
+    recent_b = arm_history_b[-5:] if arm_history_b else []
+
+    # Merge recent verdicts from both tracks
+    recent_verdicts = []
+    for entry in recent_a:
+        recent_verdicts.append({
+            "track": "a",
+            "verdict": entry.get("verdict", "—"),
+            "tas_delta": entry.get("tas_delta"),
+            "cycle_id": entry.get("cycle_id", ""),
+        })
+    for entry in recent_b:
+        recent_verdicts.append({
+            "track": "b",
+            "verdict": entry.get("verdict", "—"),
+            "tas_delta": entry.get("tas_delta", entry.get("tas_social_delta")),
+            "cycle_id": entry.get("cycle_id", ""),
+        })
+    recent_verdicts.sort(key=lambda x: x.get("cycle_id", ""), reverse=True)
+
+    strategy_experiment = {
+        "version": se.get("version", "v2"),
+        "cycle_count": se.get("cycle_count", len(arm_history_a)),
+        "updated_at": se.get("updated_at"),
+        "track_a_current_arm": track_a.get("current_arm") or {},
+        "track_a_best_arm": track_a.get("best_arm") or {},
+        "track_b_current_arm": track_b.get("current_arm") or {},
+        "track_b_best_arm": track_b.get("best_arm") or {},
+        "recent_verdicts": recent_verdicts[:10],
+        "arm_history_count_a": len(arm_history_a),
+        "arm_history_count_b": len(arm_history_b),
+        "arm_history_max": se.get("pruning", {}).get("arm_history_max", 30),
+        "coupling_alpha": se.get("coupling_alpha", 0.5),
+    }
+
+    # Skills summary
+    agents_skills = {}
+    for agent_name, agent_data in (sm.get("agents") or {}).items():
+        current = agent_data.get("current_skills") or []
+        tier_3 = agent_data.get("tier_3_skills") or []
+        agents_skills[agent_name] = {
+            "count": len(current),
+            "max": len(tier_3) if tier_3 else len(current),
+            "current_skills": current,
+        }
+
+    tas_latest = _safe("main/tas-latest.json") or {}
+    current_tas = tas_latest.get("tas_total")
+    next_tier_threshold = (sm.get("tier_thresholds") or {}).get("level_2", 2.5)
+    tas_to_next = round(next_tier_threshold - (current_tas or 0), 2) if current_tas is not None else None
+
+    skills = {
+        "current_tier": sm.get("current_tier", 1),
+        "tier_thresholds": sm.get("tier_thresholds") or {},
+        "tas_to_next_tier": tas_to_next,
+        "agents": agents_skills,
+    }
+
+    return JSONResponse({
+        "strategy_experiment": strategy_experiment,
+        "skills": skills,
+    })
+
+
+def _freshness_bucket(date_str: str | None, profile: str = "runtime") -> str:
+    """Return freshness bucket using source-specific SLA profiles."""
+    dt = _parse_dt(date_str)
+    if not dt:
+        return "critical"
+    now = datetime.now(timezone.utc)
+    if profile == "valid_until":
+        if dt >= now:
+            return "fresh"
+        overdue_min = (now - dt).total_seconds() / 60
+        return _bucket_from_age(overdue_min, profile)
+    age_min = (now - dt).total_seconds() / 60
+    return _bucket_from_age(age_min, profile)
+
+
+def _freshness_minutes(date_str: str | None) -> float | None:
+    """Return age in minutes, or None."""
+    dt = _parse_dt(date_str)
+    if not dt:
+        return None
+    return (datetime.now(timezone.utc) - dt).total_seconds() / 60
+
+
+@app.get("/api/control-tower")
+def api_control_tower():
+    """Aggregated control tower: system_mode, bottleneck, alerts, freshness."""
+    tas_latest = _safe("main/tas-latest.json") or {}
+    last_dec = _safe("main/last-decision.json") or {}
+    social_int = _safe("main/social-intent.json") or {}
+    treasury = _safe("main/treasury-policy.json") or {}
+    tas_social = _safe("bookmarker/tas-social.json") or {}
+    topic_brief = _safe("bookmarker/topic-brief.json") or {}
+    tas_trade = _safe("trader/tas-trade.json") or {}
+    reward_status = _safe("trader/reward-status.json") or {}
+    community_heat = _safe("shared/community-heat.json") or {}
+    wiki_brief = _safe("shared/wiki-execution-brief.json") or {}
+    strategy_plan = _safe("main/strategy-plan.json") or {}
+
+    # Freshness for key sources
+    sources = {
+        "tas_latest": {"ts": tas_latest.get("updated_at") or tas_latest.get("generated_at"), "profile": "runtime"},
+        "last_decision": {"ts": last_dec.get("updated_at"), "profile": "runtime"},
+        "social_intent": {"ts": social_int.get("issued_at") or social_int.get("generated_at") or social_int.get("updated_at"), "profile": "runtime"},
+        "treasury_policy": {"ts": treasury.get("issued_at") or treasury.get("generated_at") or treasury.get("updated_at"), "profile": "runtime"},
+        "tas_social": {"ts": tas_social.get("generated_at") or tas_social.get("updated_at"), "profile": "runtime"},
+        "topic_brief": {"ts": topic_brief.get("generated_at") or topic_brief.get("updated_at"), "profile": "runtime"},
+        "tas_trade": {"ts": tas_trade.get("generated_at") or tas_trade.get("updated_at"), "profile": "runtime"},
+        "reward_status": {"ts": reward_status.get("generated_at") or reward_status.get("updated_at"), "profile": "runtime"},
+        "community_heat": {"ts": community_heat.get("computed_at"), "profile": "runtime"},
+        "wiki_brief": {
+            "ts": wiki_brief.get("compiled_at"),
+            "profile": "weekly",
+            "bucket_ts": wiki_brief.get("valid_until") or wiki_brief.get("compiled_at"),
+            "bucket_profile": "valid_until" if wiki_brief.get("valid_until") else "weekly",
+        },
+    }
+    freshness: dict[str, dict[str, Any]] = {}
+    for key, info in sources.items():
+        ts = info["ts"]
+        bucket_ts = info.get("bucket_ts") or ts
+        bucket_profile = info.get("bucket_profile") or info.get("profile") or "runtime"
+        freshness[key] = {
+            "ts": ts,
+            "bucket": _freshness_bucket(bucket_ts, bucket_profile),
+            "age_min": round(_freshness_minutes(ts) or -1, 1) if ts else None,
+        }
+
+    # System mode
+    any_social_critical = any(
+        freshness[k]["bucket"] == "critical"
+        for k in ("tas_social", "topic_brief", "social_intent")
+    )
+    any_social_stale = any(
+        freshness[k]["bucket"] in ("stale", "critical")
+        for k in ("tas_social", "topic_brief", "social_intent")
+    )
+    tas_total = tas_latest.get("tas_total")
+    tas_history = _load_tas_history(limit=5)
+    tas_trend = "stable"
+    if len(tas_history) >= 2:
+        prev = tas_history[-2].get("tas_total")
+        curr = tas_history[-1].get("tas_total")
+        if prev is not None and curr is not None:
+            if curr > prev + 0.01:
+                tas_trend = "improved"
+            elif curr < prev - 0.01:
+                tas_trend = "declined"
+
+    if any_social_critical:
+        system_mode = "degraded"
+    elif tas_trend == "declined" and any_social_stale:
+        system_mode = "repair"
+    elif tas_trend == "improved" and not any_social_stale:
+        system_mode = "aggressive"
+    else:
+        system_mode = "normal"
+
+    # Primary bottleneck
+    bottleneck = None
+    if freshness.get("topic_brief", {}).get("bucket") in ("stale", "critical"):
+        bottleneck = "bookmarker topic_brief stale"
+    elif freshness.get("social_intent", {}).get("bucket") in ("stale", "critical"):
+        bottleneck = "X sync / social pipeline stale"
+    elif freshness.get("community_heat", {}).get("bucket") in ("stale", "critical"):
+        bottleneck = "community_heat missing/stale"
+    elif (tas_trade.get("risk_flags") or []):
+        bottleneck = "trader risk high"
+    elif tas_trend == "declined":
+        bottleneck = "TAS trend declining"
+
+    # Highest priority action
+    strat_action = strategy_plan.get("strategy_action") or last_dec.get("strategy_action") or "—"
+    if system_mode == "degraded":
+        highest_action = "repair social freshness"
+    elif system_mode == "repair":
+        highest_action = "rewrite social-intent / treasury-policy"
+    elif strat_action and strat_action != "—":
+        highest_action = strat_action
+    else:
+        highest_action = "maintain current strategy"
+
+    # Expected TAS lever
+    social_stale = freshness.get("tas_social", {}).get("bucket") in ("stale", "critical")
+    trader_rec = tas_trade.get("recommended_actions") or []
+    social_fresh = freshness.get("tas_social", {}).get("bucket") == "fresh"
+    if social_stale or bottleneck and "social" in (bottleneck or "").lower():
+        expected_lever = "social > trade"
+    elif trader_rec and social_fresh:
+        expected_lever = "trade > social"
+    else:
+        expected_lever = "balanced"
+
+    # Confidence
+    critical_count = sum(1 for v in freshness.values() if v["bucket"] == "critical")
+    stale_count = sum(1 for v in freshness.values() if v["bucket"] in ("stale", "critical"))
+    if critical_count >= 3:
+        confidence = "low"
+    elif stale_count >= 3:
+        confidence = "medium"
+    else:
+        confidence = "high"
+
+    # Alerts
+    alerts: list[dict[str, str]] = []
+    for key, info in freshness.items():
+        if info["bucket"] == "critical":
+            alerts.append({"level": "critical", "message": f"{key} critical"})
+        elif info["bucket"] == "stale":
+            alerts.append({"level": "warning", "message": f"{key} stale"})
+    if tas_trend == "declined":
+        alerts.append({"level": "warning", "message": "TAS trend declining"})
+    risk_flags = tas_trade.get("risk_flags") or []
+    for flag in risk_flags[:2]:
+        alerts.append({"level": "warning", "message": f"trader risk: {flag}"})
+
+    return JSONResponse({
+        "system_mode": system_mode,
+        "primary_bottleneck": bottleneck,
+        "highest_priority_action": highest_action,
+        "expected_tas_lever": expected_lever,
+        "confidence": confidence,
+        "tas_trend": tas_trend,
+        "alerts": alerts,
+        "freshness": freshness,
+    })
+
+
+@app.get("/api/agent-health")
+def api_agent_health():
+    """Agent operating model: observe/decide/execute lanes + per-agent health + freshness matrix."""
+    tas_latest = _safe("main/tas-latest.json") or {}
+    last_dec = _safe("main/last-decision.json") or {}
+    social_int = _safe("main/social-intent.json") or {}
+    treasury = _safe("main/treasury-policy.json") or {}
+    tas_social_data = _safe("bookmarker/tas-social.json") or {}
+    topic_brief = _safe("bookmarker/topic-brief.json") or {}
+    source_health = _safe("bookmarker/source-health.json") or {}
+    align_events = _safe("bookmarker/align-hook-state.json") or {}
+    tas_trade = _safe("trader/tas-trade.json") or {}
+    reward_status = _safe("trader/reward-status.json") or {}
+    wallet = _safe("trader/wallet-snapshot.json") or {}
+    community_heat = _safe("shared/community-heat.json") or {}
+    skill_manifest = _safe("main/skill-manifest.json") or {}
+    strategy_plan = _safe("main/strategy-plan.json") or {}
+    budget_alloc = _safe("shared/budget-allocation.json") or {}
+    auto_intent = _safe("bookmarker/autonomy-intent.json") or {}
+
+    # Strip sensitive data
+    wallet.pop("private_key", None)
+
+    # ── Observe lane ──
+    observe = {
+        "tas_total": tas_latest.get("tas_total"),
+        "tas_social": tas_latest.get("tas_social"),
+        "tas_trade": tas_latest.get("tas_trade"),
+        "community_heat_health": (community_heat.get("source_health") or "unavailable"),
+        "topic_brief_keywords": (topic_brief.get("keywords") or [])[:5],
+        "source_health_status": source_health.get("bird") or source_health.get("status") or "unknown",
+    }
+
+    # ── Decide lane ──
+    strat_action = strategy_plan.get("strategy_action") or last_dec.get("strategy_action") or "—"
+    decide = {
+        "strategy_action": strat_action,
+        "social_decision": last_dec.get("social_decision", "—"),
+        "treasury_decision": last_dec.get("treasury_decision", "—"),
+        "planning_focus": strategy_plan.get("hypothesis") or last_dec.get("planning_focus") or "—",
+        "autonomy_mode": tas_trade.get("autonomy_mode", "—"),
+    }
+
+    # ── Execute lane ──
+    social_hist = _safe("shared/social-history.json") or {}
+    recent_social = (social_hist.get("items") or [])[-5:]
+    trader_rec = tas_trade.get("recommended_actions") or []
+    execute = {
+        "social_intent_authorized": (social_int.get("payload") or {}).get("authorized", False),
+        "social_actions_recent": len(recent_social),
+        "trader_recommended": trader_rec[:3] if trader_rec else ["hold"],
+        "reward_claimable_usd": tas_trade.get("claimable_usd_raw"),
+    }
+
+    # ── Per-agent health ──
+    # Main
+    main_freshness = _freshness_bucket(last_dec.get("updated_at"), "runtime")
+    main_mode_map = {
+        "discard_previous_strategy": "Switch Strategy",
+        "reinforce_previous_strategy": "Reinforce Strategy",
+        "conservative_explore": "Conservative Explore",
+    }
+    main_mode = main_mode_map.get(strat_action, strat_action)
+
+    tas_trend = "stable"
+    history = _load_tas_history(limit=5)
+    if len(history) >= 2:
+        prev_t = history[-2].get("tas_total")
+        curr_t = history[-1].get("tas_total")
+        if prev_t is not None and curr_t is not None:
+            if curr_t < prev_t - 0.01:
+                tas_trend = "declined"
+            elif curr_t > prev_t + 0.01:
+                tas_trend = "improved"
+
+    main_blocker = None
+    if tas_trend == "declined":
+        main_blocker = "TAS declined"
+    elif _freshness_bucket(social_int.get("issued_at") or social_int.get("generated_at"), "runtime") in ("stale", "critical"):
+        main_blocker = "social-intent stale"
+    elif _freshness_bucket(tas_latest.get("updated_at"), "runtime") in ("stale", "critical"):
+        main_blocker = "input packet stale"
+
+    main_next = strat_action if strat_action != "—" else "maintain current strategy"
+    if main_blocker == "TAS declined":
+        main_next = "rewrite social-intent / treasury-policy"
+    elif main_blocker:
+        main_next = "repair social freshness"
+
+    # Bookmarker
+    tb_fresh = _freshness_bucket(topic_brief.get("generated_at") or topic_brief.get("updated_at"), "runtime")
+    sh_status = source_health.get("bird") or source_health.get("status") or "unknown"
+    bm_freshness = tb_fresh
+
+    tas_social_val = tas_latest.get("tas_social")
+    tas_social_trend = "stable"
+    if len(history) >= 2:
+        prev_s = history[-2].get("tas_social")
+        curr_s = history[-1].get("tas_social")
+        if prev_s is not None and curr_s is not None:
+            if curr_s > prev_s + 0.01:
+                tas_social_trend = "improved"
+            elif curr_s < prev_s - 0.01:
+                tas_social_trend = "declined"
+
+    if tb_fresh in ("stale", "critical") or sh_status != "ok":
+        bm_mode = "stale"
+    elif tas_social_trend == "improved":
+        bm_mode = "active"
+    else:
+        bm_mode = "conservative"
+
+    bm_blocker = None
+    if tb_fresh in ("stale", "critical"):
+        bm_blocker = "topic_brief stale"
+    elif sh_status != "ok":
+        bm_blocker = "source_health degraded"
+
+    bm_next = "execute social intent"
+    if bm_blocker and "topic" in (bm_blocker or ""):
+        bm_next = "recover topic pipeline"
+    elif bm_blocker:
+        bm_next = "repair source health"
+
+    # Trader
+    trader_freshness = _freshness_bucket(tas_trade.get("generated_at") or tas_trade.get("updated_at"), "runtime")
+    trader_mode = tas_trade.get("autonomy_mode", "—")
+    trader_blocker = None
+    risk_flags = tas_trade.get("risk_flags") or []
+    if risk_flags:
+        trader_blocker = f"risk: {risk_flags[0]}"
+    elif community_heat.get("source_health") != "ok":
+        trader_blocker = "heat signal unavailable"
+    elif _freshness_bucket(reward_status.get("generated_at") or reward_status.get("updated_at"), "runtime") in ("stale", "critical"):
+        trader_blocker = "reward_status stale"
+
+    trader_next = (trader_rec[0] if trader_rec else "hold")
+
+    # Claude Dispatch (鲁班)
+    dev_status = _safe("dev/status.json") or {}
+    dev_result = _safe("dev/result.json") or {}
+    dev_stage = _safe("dev/stage-status.json") or {}
+    dev_roi = _safe("dev/dispatch-roi.json") or {}
+
+    dev_result_ts = dev_result.get("completed_at") or dev_status.get("updated_at")
+
+    # Mode derivation
+    dev_st = (dev_status.get("status") or "").lower()
+    dev_res_st = (dev_result.get("status") or "").lower()
+    if dev_st == "running":
+        dev_mode = "running"
+    elif dev_res_st in ("blocked", "failed") or dev_result.get("blockers"):
+        dev_mode = "blocked"
+    elif dev_res_st in ("ok", "partial") and dev_st != "running":
+        dev_mode = "idle"
+    else:
+        dev_mode = "standby"
+
+    dev_profile = "dev" if dev_mode == "running" else "dev_idle"
+    dev_freshness = _freshness_bucket(dev_result_ts, dev_profile)
+
+    dev_blocker = None
+    blockers_list = dev_result.get("blockers") or []
+    if blockers_list:
+        dev_blocker = blockers_list[0] if isinstance(blockers_list[0], str) else str(blockers_list[0])
+    elif dev_res_st == "blocked":
+        dev_blocker = "task blocked"
+
+    if dev_mode == "running":
+        dev_next = "等待执行完成"
+    elif dev_mode == "idle":
+        dev_next = "等待 main 派单"
+    elif dev_mode == "blocked":
+        dev_next = "修复 blocker / 重新 dispatch"
+    else:
+        dev_next = "standby"
+
+    # Modules for dev dispatch
+    dev_task = _safe("dev/task.json") or {}
+    dev_modules = {
+        "task": _freshness_bucket(dev_task.get("created_at"), "dev") if dev_mode == "running" else "na",
+        "result": _freshness_bucket(dev_result.get("completed_at"), dev_profile) if dev_result.get("completed_at") else "na",
+        "tools": "na",
+        "runtime": _freshness_bucket(dev_status.get("updated_at"), dev_profile) if dev_status.get("updated_at") else "na",
+        "skills": "na",
+        "links": "na",
+    }
+
+    bookmarker_resource = _load_bookmarker_resource_status()
+    bookmarker_blocker = bm_blocker
+    if bookmarker_resource.get("identity_issue"):
+        bookmarker_blocker = "resource identity mismatch"
+    elif not bookmarker_resource.get("ok"):
+        bookmarker_blocker = bm_blocker or "resource status missing"
+
+    agents = {
+        "main": {
+            "role": "control plane",
+            "mode": main_mode,
+            "freshness": main_freshness,
+            "blocker": main_blocker,
+            "next_action": main_next,
+        },
+        "bookmarker": {
+            "role": "maximize TAS_social",
+            "mode": bm_mode,
+            "freshness": bm_freshness,
+            "blocker": bookmarker_blocker,
+            "next_action": bm_next,
+            "op": bookmarker_resource.get("op"),
+            "vp": bookmarker_resource.get("vp"),
+            "resource_agent_name": bookmarker_resource.get("agent_name"),
+            "resource_username": bookmarker_resource.get("username"),
+            "resource_updated_at": bookmarker_resource.get("updated_at"),
+            "resource_credentials_source": bookmarker_resource.get("credentials_source"),
+            "resource_identity_issue": bookmarker_resource.get("identity_issue"),
+            "op_budget": (budget_alloc.get("allocations") or {}).get("bookmarker", {}).get("op_budget"),
+            "vp_budget": (budget_alloc.get("allocations") or {}).get("bookmarker", {}).get("vp_budget"),
+        },
+        "trader": {
+            "role": "maximize TAS_trade",
+            "mode": trader_mode,
+            "freshness": trader_freshness,
+            "blocker": trader_blocker,
+            "next_action": trader_next,
+        },
+        "claude_dispatch": {
+            "role": "development executor",
+            "mode": dev_mode,
+            "freshness": dev_freshness,
+            "blocker": dev_blocker,
+            "next_action": dev_next,
+            "modules": dev_modules,
+            "latest_result_status": dev_res_st or None,
+            "result_task_id": dev_result.get("task_id"),
+            "task_summary": dev_result.get("task_summary"),
+            "files_changed": dev_result.get("files_changed") or [],
+            "built_tools": dev_result.get("built_tools") or [],
+            "result_links": dev_result.get("result_links") or [],
+            "completed_at": dev_result.get("completed_at"),
+            "tests_passed": dev_result.get("tests_passed"),
+            "test_results": dev_result.get("test_results"),
+            "blockers": blockers_list,
+            "dispatch_roi": dev_roi,
+            "stage_status": dev_stage,
+            "roi_task_id": dev_roi.get("task_id"),
+            "stage_task_id": dev_stage.get("task_id"),
+        },
+    }
+
+    # ── Freshness matrix ──
+    matrix_sources = {
+        "main": {
+            "tas": {"ts": tas_latest.get("updated_at") or tas_latest.get("generated_at"), "profile": "runtime"},
+            "intent": {"ts": social_int.get("issued_at") or social_int.get("generated_at"), "profile": "runtime"},
+            "pipeline": {"ts": last_dec.get("updated_at"), "profile": "runtime"},
+            "wallet": None,
+            "wiki": {
+                "ts": ((_safe("shared/wiki-execution-brief.json") or {}).get("valid_until") or (_safe("shared/wiki-execution-brief.json") or {}).get("compiled_at")),
+                "profile": "valid_until" if ((_safe("shared/wiki-execution-brief.json") or {}).get("valid_until")) else "weekly",
+            },
+            "skills": {"ts": (skill_manifest.get("updated_at") or skill_manifest.get("generated_at")), "profile": "daily"},
+        },
+        "bookmarker": {
+            "tas": {"ts": tas_social_data.get("generated_at") or tas_social_data.get("updated_at"), "profile": "runtime"},
+            "intent": {"ts": ((_safe("bookmarker/autonomy-intent.json") or {}).get("generated_at")), "profile": "runtime"},
+            "pipeline": {"ts": topic_brief.get("generated_at") or topic_brief.get("updated_at"), "profile": "runtime"},
+            "wallet": None,
+            "wiki": None,
+            "skills": None,
+        },
+        "trader": {
+            "tas": {"ts": tas_trade.get("generated_at") or tas_trade.get("updated_at"), "profile": "runtime"},
+            "intent": None,
+            "pipeline": {"ts": reward_status.get("generated_at") or reward_status.get("updated_at"), "profile": "runtime"},
+            "wallet": {"ts": wallet.get("updated_at") or wallet.get("generated_at"), "profile": "runtime"},
+            "wiki": None,
+            "skills": None,
+        },
+        "claude_dispatch": {
+            "tas": None,
+            "intent": {"ts": dev_task.get("created_at"), "profile": "dev"} if dev_mode == "running" else None,
+            "pipeline": {"ts": dev_result.get("completed_at") or dev_status.get("updated_at"), "profile": dev_profile},
+            "wallet": None,
+            "wiki": None,
+            "skills": None,
+        },
+    }
+
+    freshness_matrix: list[dict[str, Any]] = []
+    for agent_name in ("main", "bookmarker", "trader", "claude_dispatch"):
+        row: dict[str, str] = {"agent": agent_name}
+        for col, info in matrix_sources[agent_name].items():
+            if not info:
+                row[col] = "na"
+                continue
+            row[col] = _freshness_bucket(info.get("ts"), info.get("profile", "runtime")) if info.get("ts") else "na"
+        freshness_matrix.append(row)
+
+    return JSONResponse({
+        "observe": observe,
+        "decide": decide,
+        "execute": execute,
+        "agents": agents,
+        "freshness_matrix": freshness_matrix,
+    })
+
+
+@app.get("/api/noc")
+def api_noc():
+    """NOC / Intelligence endpoint: dependency graph, state machines, countdowns, intelligence."""
+    now = datetime.now(timezone.utc)
+
+    # ── Load data sources ──
+    social_int = _safe("main/social-intent.json") or {}
+    treasury = _safe("main/treasury-policy.json") or {}
+    last_dec = _safe("main/last-decision.json") or {}
+    topic_brief = _safe("bookmarker/topic-brief.json") or {}
+    source_health = _safe("bookmarker/source-health.json") or {}
+    bm_social_actions = _safe("bookmarker/social-execution.json") or {}
+    tas_trade = _safe("trader/tas-trade.json") or {}
+    reward_status = _safe("trader/reward-status.json") or {}
+    wiki_brief = _safe("shared/wiki-execution-brief.json") or {}
+    community_heat = _safe("shared/community-heat.json") or {}
+    runtime_status = _safe("shared/runtime-status.json") or {}
+    heartbeat_map = _safe("shared/heartbeat-map.json") or {}
+    bm_latest = _safe("bookmarker/latest.json") or {}
+    main_latest = _safe("main/latest.json") or {}
+    trader_latest = _safe("trader/latest.json") or {}
+    bm_drafts = _safe("bookmarker/social-drafts.json") or {}
+
+    # ── Helper: get timestamp from data ──
+    def _get_ts(data: dict, *keys: str) -> str | None:
+        for k in keys:
+            v = data.get(k)
+            if v:
+                return v
+        return None
+
+    # ── 1. Dependency Graph ──
+    # Chain 1: X Sync → Topic Brief → Social Intent → Social Actions
+    sh_ts = _get_ts(source_health, "updated_at", "fetched_at")
+    tb_ts = _get_ts(topic_brief, "generated_at", "updated_at")
+    si_ts = _get_ts(social_int, "issued_at", "generated_at", "updated_at")
+    sa_ts = _get_ts(bm_social_actions, "generated_at")
+
+    # Chain 2: Reward Status → TAS_trade → Treasury Policy → Claim/Trade
+    rs_ts = _get_ts(reward_status, "generated_at", "updated_at")
+    tt_ts = _get_ts(tas_trade, "generated_at", "updated_at")
+    tp_ts = _get_ts(treasury, "issued_at", "generated_at", "updated_at")
+    # Claim/Trade: use latest trader execution
+    today = datetime.now(timezone.utc).date()
+    ct_ts = None
+    for delta in range(3):
+        d = today - timedelta(days=delta)
+        rec = _load(RUNTIME / "trader" / f"executions-{d}.json") or {}
+        items = rec.get("items") or []
+        if items:
+            ct_ts = items[-1].get("ts")
+            break
+
+    # Chain 3: Raw → Wiki Compile → Agent Read → Decision
+    raw_ts = None
+    platform_manifest = _load(WORKSPACE / "wiki" / "tagclaw-platform" / "raw" / "manifest.json") or {}
+    raw_ts = platform_manifest.get("fetched_at")
+    if not raw_ts:
+        raw_dir = WORKSPACE / "wiki" / "tagclaw-platform" / "raw"
+        if raw_dir.is_dir():
+            raw_ts = _newest_mtime_iso(raw_dir)
+    wb_ts = _get_ts(wiki_brief, "compiled_at")
+    wb_bucket_ts = wiki_brief.get("valid_until") or wb_ts
+    ar_ts = _get_ts(main_latest, "generated_at", "updated_at")  # agent read = heartbeat
+    dec_ts = _get_ts(last_dec, "updated_at")
+
+    def _node(nid: str, label: str, layer: int, ts: str | None, profile: str = "runtime", bucket_ts: str | None = None, bucket_profile: str | None = None) -> dict:
+        bucket = _freshness_bucket(bucket_ts or ts, bucket_profile or profile)
+        return {"id": nid, "label": label, "layer": layer, "status": bucket, "freshness_bucket": bucket, "ts": ts}
+
+    def _edge(src: str, dst: str, label: str, src_ts: str | None, dst_ts: str | None, src_profile: str = "runtime", dst_profile: str = "runtime", src_bucket_ts: str | None = None, dst_bucket_ts: str | None = None, src_bucket_profile: str | None = None, dst_bucket_profile: str | None = None) -> dict:
+        src_bucket = _freshness_bucket(src_bucket_ts or src_ts, src_bucket_profile or src_profile)
+        dst_bucket = _freshness_bucket(dst_bucket_ts or dst_ts, dst_bucket_profile or dst_profile)
+        if src_bucket == "critical" or not src_ts:
+            status = "broken"
+        elif src_bucket in ("stale", "critical"):
+            status = "degraded"
+        elif dst_bucket in ("stale", "critical"):
+            status = "degraded"
+        else:
+            status = "ok"
+        return {"from": src, "to": dst, "label": label, "status": status}
+
+    nodes = [
+        # Chain 1
+        _node("x_sync", "X Sync", 1, sh_ts, "runtime"),
+        _node("topic_brief", "Topic Brief", 1, tb_ts, "runtime"),
+        _node("social_intent", "Social Intent", 1, si_ts, "runtime"),
+        _node("social_actions", "Social Actions", 1, sa_ts, "runtime"),
+        # Chain 2
+        _node("reward_status", "Reward Status", 2, rs_ts, "runtime"),
+        _node("tas_trade", "TAS_trade", 2, tt_ts, "runtime"),
+        _node("treasury_policy", "Treasury Policy", 2, tp_ts, "runtime"),
+        _node("claim_trade", "Claim/Trade", 2, ct_ts, "runtime"),
+        # Chain 3
+        _node("raw", "Raw", 3, raw_ts, "monthly"),
+        _node("wiki_compile", "Wiki Compile", 3, wb_ts, "weekly", wb_bucket_ts, "valid_until" if wiki_brief.get("valid_until") else "weekly"),
+        _node("agent_read", "Agent Read", 3, ar_ts, "runtime"),
+        _node("decision", "Decision", 3, dec_ts, "runtime"),
+    ]
+
+    edges = [
+        # Chain 1
+        _edge("x_sync", "topic_brief", "sync", sh_ts, tb_ts, "runtime", "runtime"),
+        _edge("topic_brief", "social_intent", "brief", tb_ts, si_ts, "runtime", "runtime"),
+        _edge("social_intent", "social_actions", "execute", si_ts, sa_ts, "runtime", "runtime"),
+        # Chain 2
+        _edge("reward_status", "tas_trade", "score", rs_ts, tt_ts, "runtime", "runtime"),
+        _edge("tas_trade", "treasury_policy", "policy", tt_ts, tp_ts, "runtime", "runtime"),
+        _edge("treasury_policy", "claim_trade", "execute", tp_ts, ct_ts, "runtime", "runtime"),
+        # Chain 3
+        _edge("raw", "wiki_compile", "ingest", raw_ts, wb_ts, "monthly", "weekly", None, wb_bucket_ts, None, "valid_until" if wiki_brief.get("valid_until") else "weekly"),
+        _edge("wiki_compile", "agent_read", "read", wb_ts, ar_ts, "weekly", "runtime", wb_bucket_ts, None, "valid_until" if wiki_brief.get("valid_until") else "weekly", None),
+        _edge("agent_read", "decision", "decide", ar_ts, dec_ts, "runtime", "runtime"),
+    ]
+
+    dependency_graph = {"nodes": nodes, "edges": edges}
+
+    # ── 2. State Machines ──
+    def _infer_main_step() -> str:
+        si_bucket = _freshness_bucket(si_ts, "runtime")
+        dec_bucket = _freshness_bucket(dec_ts, "runtime")
+        if dec_bucket == "fresh":
+            return "verify"
+        if si_bucket == "fresh":
+            return "write_intents"
+        tas_bucket = _freshness_bucket(_get_ts(_safe("main/tas-latest.json") or {}, "updated_at", "generated_at"), "runtime")
+        if tas_bucket == "fresh":
+            return "plan"
+        return "observe"
+
+    def _infer_bookmarker_step() -> str:
+        tb_bucket = _freshness_bucket(tb_ts, "runtime")
+        draft_list = bm_drafts.get("drafts") or []
+        exec_status = bm_social_actions.get("status")
+        if exec_status == "ok" and _freshness_bucket(sa_ts, "runtime") == "fresh":
+            return "publish"
+        if exec_status and _freshness_bucket(sa_ts, "runtime") in ("fresh", "aging"):
+            return "execute"
+        if draft_list:
+            return "draft"
+        if tb_bucket in ("fresh", "aging"):
+            return "brief"
+        return "sync"
+
+    def _infer_trader_step() -> str:
+        tt_bucket = _freshness_bucket(tt_ts, "runtime")
+        tp_bucket = _freshness_bucket(tp_ts, "runtime")
+        if ct_ts and _freshness_bucket(ct_ts, "runtime") == "fresh":
+            return "verify"
+        if tp_bucket == "fresh":
+            return "execute"
+        if tt_bucket == "fresh":
+            return "decide"
+        rs_bucket = _freshness_bucket(rs_ts, "runtime")
+        if rs_bucket == "fresh":
+            return "score"
+        return "observe"
+
+    state_machines = {
+        "main": {
+            "current_step": _infer_main_step(),
+            "steps": ["observe", "plan", "write_intents", "verify"],
+        },
+        "bookmarker": {
+            "current_step": _infer_bookmarker_step(),
+            "steps": ["sync", "brief", "draft", "execute", "publish"],
+        },
+        "trader": {
+            "current_step": _infer_trader_step(),
+            "steps": ["observe", "score", "decide", "execute", "verify"],
+        },
+    }
+
+    # ── 3. Countdowns ──
+    # Heartbeat estimates: main 6h, bookmarker 2h, trader 2h
+    def _next_heartbeat(agent_ts: str | None, period_hours: float) -> dict:
+        if not agent_ts:
+            return {"next_at": None, "estimated": True}
+        dt = _parse_dt(agent_ts)
+        if not dt:
+            return {"next_at": None, "estimated": True}
+        next_at = dt + timedelta(hours=period_hours)
+        return {"next_at": next_at.strftime("%Y-%m-%dT%H:%M:%SZ"), "estimated": True}
+
+    main_hb_ts = _get_ts(main_latest, "generated_at", "updated_at")
+    bm_hb_ts = _get_ts(bm_latest, "generated_at", "updated_at")
+    trader_hb_ts = _get_ts(trader_latest, "generated_at", "updated_at")
+
+    # Claim threshold progress
+    claimable_usd = tas_trade.get("claimable_usd_raw") or 0
+    threshold_usd = 2.0
+    claim_ratio = round(min(1.0, claimable_usd / threshold_usd), 3) if threshold_usd > 0 else 0
+
+    countdowns = {
+        "next_main_heartbeat_at": _next_heartbeat(main_hb_ts, 6),
+        "next_bookmarker_heartbeat_at": _next_heartbeat(bm_hb_ts, 2),
+        "next_trader_heartbeat_at": _next_heartbeat(trader_hb_ts, 2),
+        "social_intent_expires_at": social_int.get("expires_at"),
+        "treasury_policy_expires_at": treasury.get("expires_at"),
+        "wiki_brief_valid_until": wiki_brief.get("valid_until"),
+        "claim_threshold_progress": {
+            "current_usd": round(claimable_usd, 4) if claimable_usd else 0,
+            "threshold_usd": threshold_usd,
+            "ratio": claim_ratio,
+        },
+    }
+
+    # ── 4. Intelligence ──
+    heat_data = community_heat
+    heat_ticks = heat_data.get("ticks") or {}
+    top_themes = (wiki_brief.get("top_themes") or [])[:3]
+
+    # Community heat visual: sorted by rank asc, then trend_score desc
+    heat_visual: list[dict] = []
+    for tick, v in heat_ticks.items():
+        trend_score = v.get("composite_score", v.get("trend_score", 0)) or 0
+        heat_rank = v.get("heat_rank")
+        trending_rank = v.get("trending_rank")
+        display_rank = heat_rank if heat_rank is not None else trending_rank
+        intensity = min(1.0, max(0.0, trend_score)) if trend_score else (
+            min(1.0, max(0.1, 1.0 - (display_rank - 1) * 0.15)) if display_rank else 0.3
+        )
+        heat_visual.append({
+            "tick": tick,
+            "trend": v.get("trend", "stable"),
+            "trend_score": round(trend_score, 3),
+            "rank": display_rank,
+            "previous_rank": v.get("previous_heat_rank"),
+            "rank_delta": v.get("heat_rank_delta", 0),
+            "yesterday_rank": v.get("yesterday_heat_rank"),
+            "yesterday_rank_delta": v.get("yesterday_heat_rank_delta"),
+            "intensity": round(intensity, 3),
+            "social_score": round(v.get("social_score", 0) or 0, 3),
+            "trade_score": round(v.get("trade_score", 0) or 0, 3),
+            "social_delta": round(v.get("social_delta", 0) or 0, 3),
+            "trade_delta": round(v.get("trade_delta", 0) or 0, 3),
+            "social_burst_score": round(v.get("social_burst_score", 0) or 0, 3),
+            "social_sustained_score": round(v.get("social_sustained_score", 0) or 0, 3),
+            "trade_burst_score": round(v.get("trade_burst_score", 0) or 0, 3),
+            "trade_sustained_score": round(v.get("trade_sustained_score", 0) or 0, 3),
+            "composite_burst_score": round(v.get("composite_burst_score", 0) or 0, 3),
+            "composite_sustained_score": round(v.get("composite_sustained_score", 0) or 0, 3),
+            "composite_delta": round(v.get("composite_delta", 0) or 0, 3),
+            "social_posts_24h": v.get("social_posts_24h", 0),
+            "social_engagement_24h": round(v.get("social_engagement_24h", 0) or 0, 3),
+            "social_posts_7d": v.get("social_posts_7d", 0),
+            "social_engagement_7d": round(v.get("social_engagement_7d", 0) or 0, 3),
+            "trade_count_24h": v.get("trade_count_24h", 0),
+            "trade_volume_24h": round(v.get("trade_volume_24h", 0) or 0, 3),
+            "trade_count_7d": v.get("trade_count_7d", 0),
+            "trade_volume_7d": round(v.get("trade_volume_7d", 0) or 0, 3),
+            "social_momentum": v.get("social_momentum"),
+            "trade_momentum": v.get("trade_momentum"),
+            "data_coverage": v.get("data_coverage") or [],
+        })
+    heat_visual.sort(key=lambda x: (x.get("rank") or 999, -(x.get("trend_score") or 0)))
+
+    # Stale paths: nodes that are stale or critical
+    stale_paths = [n["label"] for n in nodes if n["status"] in ("stale", "critical")][:3]
+
+    # Hottest signal
+    top_rising = heat_data.get("top_rising") or []
+    hottest = top_rising[0] if top_rising else None
+    hottest_signal = f"{hottest} rising" if isinstance(hottest, str) and hottest else (
+        f"{hottest.get('tick', '?')} rising" if isinstance(hottest, dict) else "no signal"
+    )
+
+    intelligence = {
+        "top_themes": [{"name": th.get("name", ""), "heat_score": th.get("heat_score", 0)} for th in top_themes],
+        "community_heat_visual": heat_visual,
+        "community_heat_formula": heat_data.get("score_formula") or {},
+        "community_heat_windows": heat_data.get("windows") or {},
+        "stale_paths": stale_paths,
+        "hottest_signal": hottest_signal,
+    }
+
+    return JSONResponse({
+        "dependency_graph": dependency_graph,
+        "state_machines": state_machines,
+        "countdowns": countdowns,
+        "intelligence": intelligence,
+    })
 
 
 @app.get("/api/monitor/steemit")
