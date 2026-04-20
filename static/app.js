@@ -30,10 +30,6 @@ const I18N = {
     'ar-next': '下一轮',
     'ar-recent-verdicts': '最近判定',
     'ar-strategy-experiment': '策略实验',
-    // Operator lanes
-    'lane-observe': '观察',
-    'lane-decide': '决策',
-    'lane-execute': '执行',
     // Agent Operating Card labels
     'aoc-role': '角色',
     'aoc-mode': '模式',
@@ -166,9 +162,6 @@ const I18N = {
     'ar-next': 'Next Round',
     'ar-recent-verdicts': 'Recent Verdicts',
     'ar-strategy-experiment': 'Strategy Experiment',
-    'lane-observe': 'OBSERVE',
-    'lane-decide': 'DECIDE',
-    'lane-execute': 'EXECUTE',
     'aoc-role': 'Role',
     'aoc-mode': 'Mode',
     'aoc-freshness': 'Freshness',
@@ -763,7 +756,6 @@ function applyLang() {
   if (_lastStatus) renderStatus(_lastStatus);
   if (_lastTimeline) {
     renderTimeline(_lastTimeline);
-    if (_lastTimeline.summary) renderTimelineSummary(_lastTimeline.summary);
   }
   if (_lastAutoResearch) renderAutoResearch(_lastAutoResearch);
   if (_lastControlTower) renderControlTower(_lastControlTower);
@@ -2578,52 +2570,6 @@ function renderAgentHealth(data) {
   renderFreshnessMatrix(data.freshness_matrix || []);
 }
 
-function renderOperatorLanes(data) {
-  // Observe
-  const obsEl = $('lane-observe-body');
-  if (obsEl) {
-    const o = data.observe || {};
-    obsEl.innerHTML = [
-      _laneKV('TAS Total', fmt(o.tas_total)),
-      _laneKV('TAS Social', fmt(o.tas_social)),
-      _laneKV('TAS Trade', fmt(o.tas_trade)),
-      _laneKV('Heat Health', o.community_heat_health || '—'),
-      _laneKV('Source', o.source_health_status || '—'),
-    ].join('');
-  }
-
-  // Decide
-  const decEl = $('lane-decide-body');
-  if (decEl) {
-    const d = data.decide || {};
-    decEl.innerHTML = [
-      _laneKV('Strategy', operatorLang(d.strategy_action)),
-      _laneKV('Social', d.social_decision || '—'),
-      _laneKV('Treasury', d.treasury_decision || '—'),
-      _laneKV('Focus', (d.planning_focus || '—').slice(0, 50)),
-      _laneKV('Autonomy', d.autonomy_mode || '—'),
-    ].join('');
-  }
-
-  // Execute
-  const exeEl = $('lane-execute-body');
-  if (exeEl) {
-    const e = data.execute || {};
-    const authIcon = e.social_intent_authorized ? '✓' : '✗';
-    const authCls = e.social_intent_authorized ? 'clr-ok' : 'clr-warn';
-    exeEl.innerHTML = [
-      `<div class="lane-kv"><span class="lk">Intent Auth</span><span class="lv ${authCls}">${authIcon}</span></div>`,
-      _laneKV('Recent Actions', e.social_actions_recent || 0),
-      _laneKV('Trader Rec', (e.trader_recommended || []).join(', ') || 'hold'),
-      _laneKV('Claimable', e.reward_claimable_usd != null ? '$' + fmt(e.reward_claimable_usd) : '—'),
-    ].join('');
-  }
-}
-
-function _laneKV(label, value) {
-  return `<div class="lane-kv"><span class="lk">${escHtml(label)}</span><span class="lv">${escHtml(String(value))}</span></div>`;
-}
-
 function renderAgentOperatingCards(agents) {
   for (const agentId of ['main', 'bookmarker', 'trader', 'claude_dispatch']) {
     const el = $('agent-card-' + agentId);
@@ -2680,26 +2626,6 @@ function renderFreshnessMatrix(matrix) {
   });
   html += '</div>';
   el.innerHTML = html;
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// V2: Timeline Summary
-// ══════════════════════════════════════════════════════════════════════════
-function renderTimelineSummary(summary) {
-  const el = $('timeline-summary-row');
-  if (!el || !summary) return;
-  el.innerHTML = [
-    _tlPill(t('tl-posts'), summary.posts_24h),
-    _tlPill(t('tl-curations'), summary.curations_24h),
-    _tlPill(t('tl-claims'), summary.claims_24h),
-    _tlPill(t('tl-blocked'), summary.blocked_24h),
-    _tlPill(t('tl-dominant'), summary.dominant_agent || 'none'),
-    _tlPill(t('tl-last-ok'), summary.last_success_at ? shortTs(summary.last_success_at) : '—'),
-  ].join('');
-}
-
-function _tlPill(label, value) {
-  return `<div class="tl-summary-pill"><span class="tsp-label">${escHtml(label)}</span><span class="tsp-value">${escHtml(String(value ?? 0))}</span></div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3287,7 +3213,6 @@ async function fetchAll() {
     _lastExplainability = explainability;
     renderStatus(status);
     renderTimeline(timeline);
-    if (timeline && timeline.summary) renderTimelineSummary(timeline.summary);
     if (autoresearch) renderAutoResearch(autoresearch);
     if (controlTower) renderControlTower(controlTower);
     if (agentHealth) renderAgentHealth(agentHealth);
