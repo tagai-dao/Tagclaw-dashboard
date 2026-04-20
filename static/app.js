@@ -30,10 +30,6 @@ const I18N = {
     'ar-next': '下一轮',
     'ar-recent-verdicts': '最近判定',
     'ar-strategy-experiment': '策略实验',
-    // Operator lanes
-    'lane-observe': '观察',
-    'lane-decide': '决策',
-    'lane-execute': '执行',
     // Agent Operating Card labels
     'aoc-role': '角色',
     'aoc-mode': '模式',
@@ -166,9 +162,6 @@ const I18N = {
     'ar-next': 'Next Round',
     'ar-recent-verdicts': 'Recent Verdicts',
     'ar-strategy-experiment': 'Strategy Experiment',
-    'lane-observe': 'OBSERVE',
-    'lane-decide': 'DECIDE',
-    'lane-execute': 'EXECUTE',
     'aoc-role': 'Role',
     'aoc-mode': 'Mode',
     'aoc-freshness': 'Freshness',
@@ -763,7 +756,6 @@ function applyLang() {
   if (_lastStatus) renderStatus(_lastStatus);
   if (_lastTimeline) {
     renderTimeline(_lastTimeline);
-    if (_lastTimeline.summary) renderTimelineSummary(_lastTimeline.summary);
   }
   if (_lastAutoResearch) renderAutoResearch(_lastAutoResearch);
   if (_lastControlTower) renderControlTower(_lastControlTower);
@@ -874,27 +866,10 @@ function escHtml(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function normalizeSummaryText(text) {
-  if (text == null || text === '') return '—';
-  if (Array.isArray(text)) {
-    const parts = text.filter(v => v != null && String(v).trim() !== '').map(v => String(v).trim());
-    return parts.length ? parts.join(' · ') : '—';
-  }
-  if (typeof text === 'object') {
-    try {
-      return JSON.stringify(text);
-    } catch (_) {
-      return String(text);
-    }
-  }
-  return String(text);
-}
-
 // ── cleanSummary: replace technical jargon in timeline notes ──────────────
 function cleanSummary(text) {
-  const normalized = normalizeSummaryText(text);
-  if (!normalized || normalized === '—') return '—';
-  return normalized
+  if (!text) return '—';
+  return text
     .replace(/conservative_explore/g, langText('保守探索', 'Conservative Explore'))
     .replace(/reinforce_previous_strategy/g, langText('延续策略', 'Reinforce Strategy'))
     .replace(/discard_previous_strategy/g, langText('切换策略', 'Switch Strategy'))
@@ -987,16 +962,12 @@ document.addEventListener('click', function(e) {
 
 // ── Sparkline SVG ─────────────────────────────────────────────────────────
 // values: array of numbers, timestamps: optional array of ISO strings (same length)
-// statuses: optional array of status strings (same length)
-// - 'ok' => canonical solid point
-// - non-ok + numeric value => hollow ring (degraded but value present)
-// - non-ok + null value => explicit gap marker (do not connect the line across the gap)
+// statuses: optional array of status strings (same length) — 'ok' = canonical, else degraded
 function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
   const leftPad = 28, rightPad = 6, padY = 6, botPad = 18;
   const chartW = w - leftPad - rightPad;
   const chartH = h - padY - botPad;
-  const pts = values.map((v, i) => ({ v: numericOrNull(v), i, status: (statuses && statuses[i]) || 'ok' }));
-  const valid = pts.filter(p => p.v !== null);
+  const valid = values.map((v, i) => ({ v: numericOrNull(v), i })).filter(p => p.v !== null);
   if (!valid.length) return `<svg viewBox="0 0 ${w} ${h}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="9">${t('no-tas-history')}</text></svg>`;
 
   const rawMin = Math.min(...valid.map(p => p.v));
@@ -1009,46 +980,16 @@ function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
   const toX = i => leftPad + (i / count) * chartW;
   const toY = v => padY + chartH - ((v - yMin) / ySpan) * chartH;
   const baseY = padY + chartH;
+  const linePts = valid.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
+  const areaPath = `${linePts.join(' ')} ${toX(valid[valid.length - 1].i).toFixed(1)},${baseY.toFixed(1)} ${toX(valid[0].i).toFixed(1)},${baseY.toFixed(1)}`;
   const hexToRgb = h => { const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h); return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '255,255,255'; };
   const rgb = hexToRgb(color);
-
-  const segments = [];
-  let currentSeg = [];
-  pts.forEach(p => {
-    if (p.v === null) {
-      if (currentSeg.length) segments.push(currentSeg);
-      currentSeg = [];
-      return;
-    }
-    currentSeg.push(p);
-  });
-  if (currentSeg.length) segments.push(currentSeg);
-
-  const areaPolys = segments
-    .filter(seg => seg.length >= 2)
-    .map(seg => {
-      const linePts = seg.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
-      const areaPts = `${linePts.join(' ')} ${toX(seg[seg.length - 1].i).toFixed(1)},${baseY.toFixed(1)} ${toX(seg[0].i).toFixed(1)},${baseY.toFixed(1)}`;
-      return `<polygon points="${areaPts}" fill="url(#sg-${rgb.replace(/,/g,'-')})"/>`;
-    }).join('');
-
-  const lineSegs = segments.map(seg => {
-    const linePts = seg.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
-    return `<polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePts.join(' ')}"/>`;
-  }).join('');
-
-  const markers = pts.map(p => {
-    const x = toX(p.i).toFixed(1);
-    if (p.v === null) {
-      if (!p.status || p.status === 'ok') return '';
-      const y = (baseY - 2).toFixed(1);
-      return `<line x1="${x}" y1="${padY}" x2="${x}" y2="${baseY.toFixed(1)}" stroke="${color}" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.16"/>`
-        + `<circle cx="${x}" cy="${y}" r="2.6" fill="none" stroke="${color}" stroke-width="1" opacity="0.5"><title>${p.status}</title></circle>`;
-    }
-    const y = toY(p.v).toFixed(1);
-    const isOk = !p.status || p.status === 'ok';
-    if (isOk) return `<circle cx="${x}" cy="${y}" r="2" fill="${color}" opacity="0.9"/>`;
-    return `<circle cx="${x}" cy="${y}" r="2.5" fill="none" stroke="${color}" stroke-width="1" opacity="0.45"><title>${p.status}</title></circle>`;
+  // P3 2026-04-10: degraded/partial points rendered as hollow rings with lower opacity
+  const dots = valid.map(p => {
+    const isOk = !statuses || !statuses[p.i] || statuses[p.i] === 'ok';
+    if (isOk) return `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2" fill="${color}" opacity="0.9"/>`;
+    return `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2.5" fill="none" stroke="${color}" stroke-width="1" opacity="0.4"/>`
+      + `<title>${statuses[p.i]}</title>`;
   }).join('');
 
   // Y-axis labels (min, mid, max)
@@ -1086,9 +1027,9 @@ function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
     <defs><linearGradient id="sg-${rgb.replace(/,/g,'-')}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.25"/><stop offset="100%" stop-color="${color}" stop-opacity="0.03"/></linearGradient></defs>
     ${gridLines}
     <line x1="${leftPad}" y1="${baseY.toFixed(1)}" x2="${(leftPad + chartW).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-    ${areaPolys}
-    ${lineSegs}
-    ${markers}
+    <polygon points="${areaPath}" fill="url(#sg-${rgb.replace(/,/g,'-')})"/>
+    <polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePts.join(' ')}"/>
+    ${dots}
     ${yLabels}
     ${yTitle}
     ${xLabels}
@@ -1324,25 +1265,17 @@ function renderTasCommandCenter(data) {
   const sparkEl = $('cc-sparkline');
   let pts = [];
   if (sparkEl) {
-    const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const cutoffMs = Date.now() - 72 * 60 * 60 * 1000;
     pts = history.filter(p => { try { return new Date(p.ts).getTime() >= cutoffMs; } catch { return false; } });
     if (pts.length < 5) pts = history.slice(-12);
-    const recomputeStatuses = () => ({
-      total: pts.map(p => p.status || 'ok'),
-      social: pts.map(p => (numericOrNull(p.tas_social) === null ? (p.status || 'missing') : 'ok')),
-      trade: pts.map(p => (numericOrNull(p.tas_trade) === null ? (p.status || 'missing') : 'ok')),
-    });
-    const st = recomputeStatuses();
-    sparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_total), '#00d26a', 300, 70, pts.map(p => p.ts), st.total);
-    pts._metricStatuses = st;
+    sparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_total), '#00d26a', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
   }
-  // P3/P5: explain degraded aggregate points more explicitly — a dip can be a lower-bound sample
-  // caused by one missing component, while component charts may show a gap marker instead of a drop.
+  // P3: show legend when degraded/partial points exist
   const legendEl = $('cc-sparkline-legend');
   if (legendEl) {
     const degradedCount = pts.filter(p => p.status && p.status !== 'ok').length;
     legendEl.textContent = degradedCount > 0
-      ? (_lang === 'zh' ? `${degradedCount} 个降级/不完整聚合点：空心圆=值存在但降级；断点标记=该分量当轮缺失，不参与趋势计算` : `${degradedCount} degraded aggregate point(s): hollow dots = degraded value present; gap markers = component missing, excluded from trend`)
+      ? (_lang === 'zh' ? `${degradedCount} 个降级/不完整数据点（空心圆），不参与趋势计算` : `${degradedCount} degraded/partial point(s) (hollow dots) excluded from trend`)
       : '';
   }
 
@@ -1376,8 +1309,7 @@ function renderTasCommandCenter(data) {
   // TAS_social sparkline (same style as Aggregated TAS)
   const socialSparkEl = $('cc-social-sparkline');
   if (socialSparkEl && pts.length) {
-    const socialStatuses = (pts._metricStatuses && pts._metricStatuses.social) || pts.map(p => (numericOrNull(p.tas_social) === null ? (p.status || 'missing') : 'ok'));
-    socialSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_social), '#58a6ff', 300, 70, pts.map(p => p.ts), socialStatuses);
+    socialSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_social), '#58a6ff', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
   }
   // P4 2026-04-10: explain TAS_social flat lines — when the last N points have identical values,
   // the 24h rolling window likely has no new owner-interaction delta.
@@ -1422,8 +1354,7 @@ function renderTasCommandCenter(data) {
   // TAS_trade sparkline (same style as Aggregated TAS)
   const tradeSparkEl = $('cc-trade-sparkline');
   if (tradeSparkEl && pts.length) {
-    const tradeStatuses = (pts._metricStatuses && pts._metricStatuses.trade) || pts.map(p => (numericOrNull(p.tas_trade) === null ? (p.status || 'missing') : 'ok'));
-    tradeSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_trade), '#f0a500', 300, 70, pts.map(p => p.ts), tradeStatuses);
+    tradeSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_trade), '#f0a500', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
   }
 }
 
@@ -1540,74 +1471,6 @@ function renderMainTab(main) {
 }
 
 // ── Bookmarker Tab ──
-function renderBookmarkerCurationVpPanel(panel) {
-  const el = $('bm-curation-vp-panel');
-  if (!el) return;
-  if (!panel || !panel.total_curations) {
-    el.innerHTML = `<div class="muted small">${langText('近 24h 无策展记录', 'No curations in last 24h')}</div>`;
-    return;
-  }
-  const buckets = panel.buckets || [];
-  const maxCount = Math.max(1, ...buckets.map(b => Number(b.count || 0)));
-  const summaryRows = `
-    <div class="kv-compact compact-stack">
-      <div class="kv-row"><span class="k">curations_24h</span><span class="v mono">${escHtml(String(panel.total_curations ?? '—'))}</span></div>
-      <div class="kv-row"><span class="k">vp_spent_24h</span><span class="v mono">${escHtml(fmt(panel.total_vp_spent))}</span></div>
-      <div class="kv-row"><span class="k">avg_vp</span><span class="v mono">${escHtml(fmt(panel.avg_vp))}</span></div>
-      <div class="kv-row"><span class="k">VP&gt;1 share</span><span class="v mono">${escHtml(fmt(panel.non_one_share_pct))}%</span></div>
-      <div class="kv-row"><span class="k">unique_levels</span><span class="v mono">${escHtml((panel.unique_levels || []).join(', ') || '—')}</span></div>
-    </div>`;
-  const bars = buckets.map(b => {
-    const count = Number(b.count || 0);
-    const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
-    return `<div class="heat-bar-row">
-      <span class="heat-bar-tick">VP ${b.vp}</span>
-      <div class="heat-bar-wrap"><div class="heat-bar-fill hb-stable" style="width:${pct.toFixed(0)}%"></div></div>
-      <div class="heat-bar-meta">
-        <span class="heat-bar-score">${count}×</span>
-        <span class="heat-bar-rank">${fmt(b.share_pct, 1)}%</span>
-      </div>
-    </div>`;
-  }).join('');
-  const recent = listHtml((panel.recent || []).map(r => ({
-    title: `VP ${r.vp ?? '?'} · ${(r.target_key || r.tweet_id || '?')}`,
-    sub: [shortTs(r.executed_at), r.reason].filter(Boolean).join(' · '),
-    right: r.cycle_id ? String(r.cycle_id).slice(11, 16) : '',
-  })));
-  el.innerHTML = `${summaryRows}
-    <div class="heat-bars" style="margin-top:.55rem">${bars}</div>
-    <div class="section-label" style="margin-top:.65rem">${langText('最近策展', 'Recent curations')}</div>
-    ${recent}`;
-}
-
-function renderBookmarkerFallbackPreview(panel) {
-  const el = $('bm-curation-preview-panel');
-  if (!el) return;
-  if (!panel || panel.ok === false) {
-    const err = panel && panel.error ? String(panel.error) : langText('预览暂不可用', 'Preview unavailable');
-    el.innerHTML = `<div class="muted small">${escHtml(err)}</div>`;
-    return;
-  }
-  const candidates = panel.candidates || [];
-  const summary = `
-    <div class="kv-compact compact-stack">
-      <div class="kv-row"><span class="k">candidate_count</span><span class="v mono">${escHtml(String(panel.candidate_count ?? 0))}</span></div>
-      <div class="kv-row"><span class="k">updated_at</span><span class="v mono">${escHtml(shortTs(panel.updated_at) || '—')}</span></div>
-    </div>`;
-  if (!candidates.length) {
-    el.innerHTML = `${summary}<div class="muted small" style="margin-top:.55rem">${langText('当前没有可用的 fallback curate 候选', 'No fallback curate candidates right now')}</div>`;
-    return;
-  }
-  const list = listHtml(candidates.map(c => ({
-    title: `VP ${c.vp ?? '?'} · ${(c.target_key || c.tweet_id || '?')}`,
-    sub: c.reason || c.source || '',
-    right: c.tweet_id || '',
-  })));
-  el.innerHTML = `${summary}
-    <div class="section-label" style="margin-top:.65rem">${langText('如果本轮现在策展', 'If curate ran now')}</div>
-    ${list}`;
-}
-
 function renderBookmarkerTab(bm) {
   const brief = bm.topic_brief || {};
   const cands = bm.content_candidates || {};
@@ -1673,8 +1536,6 @@ function renderBookmarkerTab(bm) {
     ]);
   }
 
-  renderBookmarkerCurationVpPanel(bm.curation_vp_24h || {});
-  renderBookmarkerFallbackPreview(bm.curation_fallback_preview || {});
   renderPipeline('bm-social-pipeline', bm.social_pipeline, 'bookmarker');
 
   // Populate merged detail slots inside pipeline step cards
@@ -2659,20 +2520,10 @@ function renderActionRequired(controlTower, agentHealth) {
 // ══════════════════════════════════════════════════════════════════════════
 // V2: Control Tower Render
 // ══════════════════════════════════════════════════════════════════════════
-function _setInlineMetric(id, value, fallback='—') {
-  const el = $(id);
-  if (!el) return;
-  el.textContent = value == null || value === '' ? fallback : String(value);
-}
-
 function renderControlTower(data) {
   if (!data) return;
 
-  _setInlineMetric('ct-system-mode', operatorLang(data.system_mode || 'normal'));
-  _setInlineMetric('ct-primary-bottleneck', data.primary_bottleneck || langText('无明确瓶颈', 'no explicit bottleneck'));
-  _setInlineMetric('ct-highest-priority', operatorLang(data.highest_priority_action || '—'));
-  _setInlineMetric('ct-tas-lever', operatorLang(data.expected_tas_lever || '—'));
-  _setInlineMetric('ct-confidence', operatorLang(data.confidence || '—'));
+  // Mission Status Bar slots removed (SYSTEM MODE, PRIMARY BOTTLENECK, HIGHEST PRIORITY, TAS LEVER, CONFIDENCE)
 
   // Alerts Strip
   const alertsEl = $('alerts-strip');
@@ -2714,55 +2565,9 @@ function _addMetaBadge(parentId, info) {
 // ══════════════════════════════════════════════════════════════════════════
 function renderAgentHealth(data) {
   if (!data) return;
-  renderOperatorLanes(data);
+  // Operator Lanes section removed from dashboard
   renderAgentOperatingCards(data.agents || {});
   renderFreshnessMatrix(data.freshness_matrix || []);
-}
-
-function renderOperatorLanes(data) {
-  // Observe
-  const obsEl = $('lane-observe-body');
-  if (obsEl) {
-    const o = data.observe || {};
-    obsEl.innerHTML = [
-      _laneKV('TAS Total', fmt(o.tas_total)),
-      _laneKV('TAS Social', fmt(o.tas_social)),
-      _laneKV('TAS Trade', fmt(o.tas_trade)),
-      _laneKV('Heat Health', o.community_heat_health || '—'),
-      _laneKV('Source', o.source_health_status || '—'),
-    ].join('');
-  }
-
-  // Decide
-  const decEl = $('lane-decide-body');
-  if (decEl) {
-    const d = data.decide || {};
-    decEl.innerHTML = [
-      _laneKV('Strategy', operatorLang(d.strategy_action)),
-      _laneKV('Social', d.social_decision || '—'),
-      _laneKV('Treasury', d.treasury_decision || '—'),
-      _laneKV('Focus', (d.planning_focus || '—').slice(0, 50)),
-      _laneKV('Autonomy', d.autonomy_mode || '—'),
-    ].join('');
-  }
-
-  // Execute
-  const exeEl = $('lane-execute-body');
-  if (exeEl) {
-    const e = data.execute || {};
-    const authIcon = e.social_intent_authorized ? '✓' : '✗';
-    const authCls = e.social_intent_authorized ? 'clr-ok' : 'clr-warn';
-    exeEl.innerHTML = [
-      `<div class="lane-kv"><span class="lk">Intent Auth</span><span class="lv ${authCls}">${authIcon}</span></div>`,
-      _laneKV('Recent Actions', e.social_actions_recent || 0),
-      _laneKV('Trader Rec', (e.trader_recommended || []).join(', ') || 'hold'),
-      _laneKV('Claimable', e.reward_claimable_usd != null ? '$' + fmt(e.reward_claimable_usd) : '—'),
-    ].join('');
-  }
-}
-
-function _laneKV(label, value) {
-  return `<div class="lane-kv"><span class="lk">${escHtml(label)}</span><span class="lv">${escHtml(String(value))}</span></div>`;
 }
 
 function renderAgentOperatingCards(agents) {
@@ -2775,21 +2580,15 @@ function renderAgentOperatingCards(agents) {
     const blockerCls = a.blocker ? 'aoc-blocker' : 'aoc-no-blocker';
     const roleDisplay = agentId === 'claude_dispatch' ? langText('开发执行器', 'Dispatch Executor') : (translateLiteral(a.role || '') || a.role || humanize(agentId));
     const slots = [];
-    // For bookmarker, separate live resource pool from allocated budget.
-    if (agentId === 'bookmarker' && (a.op != null || a.vp != null || a.op_budget != null || a.vp_budget != null)) {
+    // For bookmarker, show OP/VP first in the same row as Role/Mode/etc.
+    if (agentId === 'bookmarker' && (a.op != null || a.vp != null)) {
       const opVal = a.op != null ? Number(a.op).toFixed(1) : '—';
       const vpVal = a.vp != null ? Number(a.vp).toFixed(1) : '—';
-      const opBudget = a.op_budget != null ? Number(a.op_budget).toFixed(1) : '—';
-      const vpBudget = a.vp_budget != null ? Number(a.vp_budget).toFixed(1) : '—';
-      slots.push(`<div class="aoc-slot"><span class="aoc-label">${langText('OP（实时）', 'OP (live)')}</span><span class="aoc-value">${escHtml(opVal)}</span></div>`);
-      slots.push(`<div class="aoc-slot"><span class="aoc-label">${langText('VP（实时）', 'VP (live)')}</span><span class="aoc-value">${escHtml(vpVal)}</span></div>`);
-      slots.push(`<div class="aoc-slot"><span class="aoc-label">${langText('OP 预算', 'OP budget')}</span><span class="aoc-value">${escHtml(opBudget)}</span></div>`);
-      slots.push(`<div class="aoc-slot"><span class="aoc-label">${langText('VP 预算', 'VP budget')}</span><span class="aoc-value">${escHtml(vpBudget)}</span></div>`);
-      el.classList.add('aoc-9col');
-      el.classList.remove('aoc-7col');
+      slots.push(`<div class="aoc-slot"><span class="aoc-label">${t('OP')}</span><span class="aoc-value">${escHtml(opVal)}</span></div>`);
+      slots.push(`<div class="aoc-slot"><span class="aoc-label">${t('VP')}</span><span class="aoc-value">${escHtml(vpVal)}</span></div>`);
+      el.classList.add('aoc-7col');
     } else {
       el.classList.remove('aoc-7col');
-      el.classList.remove('aoc-9col');
     }
     slots.push(
       `<div class="aoc-slot"><span class="aoc-label">${t('aoc-role')}</span><span class="aoc-value">${escHtml(roleDisplay)}</span></div>`,
@@ -2827,26 +2626,6 @@ function renderFreshnessMatrix(matrix) {
   });
   html += '</div>';
   el.innerHTML = html;
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// V2: Timeline Summary
-// ══════════════════════════════════════════════════════════════════════════
-function renderTimelineSummary(summary) {
-  const el = $('timeline-summary-row');
-  if (!el || !summary) return;
-  el.innerHTML = [
-    _tlPill(t('tl-posts'), summary.posts_24h),
-    _tlPill(t('tl-curations'), summary.curations_24h),
-    _tlPill(t('tl-claims'), summary.claims_24h),
-    _tlPill(t('tl-blocked'), summary.blocked_24h),
-    _tlPill(t('tl-dominant'), summary.dominant_agent || 'none'),
-    _tlPill(t('tl-last-ok'), summary.last_success_at ? shortTs(summary.last_success_at) : '—'),
-  ].join('');
-}
-
-function _tlPill(label, value) {
-  return `<div class="tl-summary-pill"><span class="tsp-label">${escHtml(label)}</span><span class="tsp-value">${escHtml(String(value ?? 0))}</span></div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3412,15 +3191,6 @@ function _renderExplainEvents(events) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-function renderSafely(name, fn) {
-  try {
-    fn();
-  } catch (e) {
-    console.error(`[render:${name}]`, e);
-    showError(`${t('fetch-error')}${name}: ${e.message}`);
-  }
-}
-
 // Main fetch loop
 // ══════════════════════════════════════════════════════════════════════════
 async function fetchAll() {
@@ -3441,30 +3211,16 @@ async function fetchAll() {
     _lastAgentHealth = agentHealth;
     _lastNoc = noc;
     _lastExplainability = explainability;
-    renderSafely('status', () => renderStatus(status));
-    renderSafely('timeline', () => renderTimeline(timeline));
-    renderSafely('timeline-summary', () => {
-      if (timeline && timeline.summary) renderTimelineSummary(timeline.summary);
-    });
-    renderSafely('autoresearch', () => {
-      if (autoresearch) renderAutoResearch(autoresearch);
-    });
-    renderSafely('control-tower', () => {
-      if (controlTower) renderControlTower(controlTower);
-    });
-    renderSafely('agent-health', () => {
-      if (agentHealth) renderAgentHealth(agentHealth);
-    });
-    renderSafely('action-required', () => renderActionRequired(controlTower, agentHealth));
-    renderSafely('noc', () => {
-      if (noc) renderNoc(noc);
-    });
-    renderSafely('explainability', () => {
-      if (explainability) renderExplainability(explainability);
-    });
-    renderSafely('hero-bar', () => renderHeroBar(controlTower, timeline, agentHealth, status));
-    renderSafely('next-post-preview', () => renderNextPostPreview(status));
-    renderSafely('translate-dom', () => translateDomTextNodes());
+    renderStatus(status);
+    renderTimeline(timeline);
+    if (autoresearch) renderAutoResearch(autoresearch);
+    if (controlTower) renderControlTower(controlTower);
+    if (agentHealth) renderAgentHealth(agentHealth);
+    if (noc) renderNoc(noc);
+    if (explainability) renderExplainability(explainability);
+    renderHeroBar(controlTower, timeline, agentHealth, status);
+    renderNextPostPreview(status);
+    translateDomTextNodes();
     // renderAgentQuickCards removed (cards deleted from UI)
   } catch (e) {
     showError(t('fetch-error') + e.message);
