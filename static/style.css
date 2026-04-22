@@ -835,8 +835,11 @@ main { padding: 1rem 1.5rem; display: flex; flex-direction: column; gap: 1.5rem;
 .aoc-no-blocker { color: var(--muted); font-weight: 400; }
 
 /* Bookmarker card resource variants */
+.agent-operating-card.aoc-6col { grid-template-columns: repeat(6, 1fr); }
 .agent-operating-card.aoc-7col { grid-template-columns: repeat(7, 1fr); }
 .agent-operating-card.aoc-9col { grid-template-columns: repeat(9, 1fr); }
+.aoc-address { word-break: break-all; }
+.wallet-address-full { word-break: break-all; }
 
 /* ══ Timeline Summary Row ══ */
 .timeline-summary-row {
@@ -1057,6 +1060,7 @@ main { padding: 1rem 1.5rem; display: flex; flex-direction: column; gap: 1.5rem;
   .lane-grid { grid-template-columns: 1fr; }
   .timeline-wiki-duo { grid-template-columns: 1fr; }
   .agent-operating-card { grid-template-columns: repeat(3, 1fr); }
+  .agent-operating-card.aoc-6col,
   .agent-operating-card.aoc-7col { grid-template-columns: repeat(3, 1fr); }
   .pipeline-details-row { flex-direction: column; }
   .pipeline-detail-cell { max-width: none; min-width: 0; }
