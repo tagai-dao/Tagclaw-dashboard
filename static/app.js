@@ -36,6 +36,7 @@ const I18N = {
     'aoc-freshness': '数据时效',
     'aoc-blocker': '阻塞点',
     'aoc-next-action': '下一步动作',
+    'aoc-wallet-address': '钱包地址',
     // Common labels
     'label-last-active': '最后活跃',
     'label-mode': '模式',
@@ -167,6 +168,7 @@ const I18N = {
     'aoc-freshness': 'Freshness',
     'aoc-blocker': 'Blocker',
     'aoc-next-action': 'Next Action',
+    'aoc-wallet-address': 'Wallet Address',
     'label-last-active': 'last active',
     'label-mode': 'Mode',
     'label-risk': 'Risk',
@@ -811,6 +813,13 @@ function shortTs(ts) {
     const mi = String(d.getMinutes()).padStart(2, '0');
     return `${mm}-${dd} ${hh}:${mi}`;
   } catch { return ts.slice(0, 16); }
+}
+
+function shortAddr(addr, head = 6, tail = 4) {
+  const s = String(addr || '').trim();
+  if (!s) return '—';
+  if (s.length <= head + tail + 3) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }
 
 function statusClass(s) {
@@ -1599,6 +1608,10 @@ function renderTraderTab(trader) {
   if (balEl) {
     const totalUsd = onchain.total_portfolio_usd;
     const positions = onchain.positions || [];
+    const walletAddress = wallet.wallet_address || wallet.address || trader.wallet_address || '';
+    const addressRow = walletAddress
+      ? `<div class="list-item wallet-address-row"><div class="item-left"><div class="item-title">${t('aoc-wallet-address')}</div><div class="item-sub mono wallet-address-full">${escHtml(walletAddress)}</div></div></div>`
+      : '';
     if (positions.length) {
       const total = parseFloat(totalUsd || 0);
       const totalRow = totalUsd != null ? `<div class="list-item wallet-total"><div class="item-left"><div class="item-title">${t('total-value')}</div></div><div class="item-right">$${fmt(totalUsd)}</div></div>` : '';
@@ -1608,11 +1621,12 @@ function renderTraderTab(trader) {
         const pct = total > 0 ? `${(ratio * 100).toFixed(1)}%` : '—';
         return `<div class="list-item"><div class="item-left"><div class="item-title">${escHtml(p.tick || '')}</div><div class="item-sub">${t('portfolio-share')} ${escHtml(pct)}</div></div><div class="item-right">${escHtml(fmtNum(parseFloat(p.balance)))} ($${escHtml(fmt(p.value_usd))})</div></div>`;
       }).join('');
-      balEl.innerHTML = totalRow + rows;
+      balEl.innerHTML = addressRow + totalRow + rows;
     } else {
       const bals = wallet.balances || {};
       const items = Object.entries(bals).map(([tick, amt]) => ({ title: tick, right: fmtNum(parseFloat(amt)) }));
-      balEl.innerHTML = items.length ? listHtml(items) : `<div class="muted small">${t('no-balance')}</div>`;
+      const balanceHtml = items.length ? listHtml(items) : `<div class="muted small">${t('no-balance')}</div>`;
+      balEl.innerHTML = addressRow + balanceHtml;
     }
   }
 
@@ -2590,6 +2604,11 @@ function renderAgentOperatingCards(agents) {
     } else {
       el.classList.remove('aoc-7col');
     }
+    if (agentId === 'trader' && a.wallet_address) {
+      el.classList.add('aoc-6col');
+    } else {
+      el.classList.remove('aoc-6col');
+    }
     slots.push(
       `<div class="aoc-slot"><span class="aoc-label">${t('aoc-role')}</span><span class="aoc-value">${escHtml(roleDisplay)}</span></div>`,
       `<div class="aoc-slot"><span class="aoc-label">${t('aoc-mode')}</span><span class="aoc-value">${escHtml(operatorLang(a.mode))}</span></div>`,
@@ -2597,6 +2616,9 @@ function renderAgentOperatingCards(agents) {
       `<div class="aoc-slot"><span class="aoc-label">${t('aoc-blocker')}</span><span class="aoc-value ${blockerCls}">${escHtml(a.blocker || 'none')}</span></div>`,
       `<div class="aoc-slot"><span class="aoc-label">${t('aoc-next-action')}</span><span class="aoc-value">${escHtml(operatorLang(a.next_action))}</span></div>`,
     );
+    if (agentId === 'trader' && a.wallet_address) {
+      slots.push(`<div class="aoc-slot"><span class="aoc-label">${t('aoc-wallet-address')}</span><span class="aoc-value aoc-address" title="${escHtml(a.wallet_address)}">${escHtml(shortAddr(a.wallet_address))}</span></div>`);
+    }
     el.innerHTML = slots.join('');
   }
 }

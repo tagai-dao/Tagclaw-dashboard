@@ -2557,6 +2557,7 @@ def api_agent_health():
             "freshness": trader_freshness,
             "blocker": trader_blocker,
             "next_action": trader_next,
+            "wallet_address": wallet.get("wallet_address") or wallet.get("address"),
         },
         "claude_dispatch": {
             "role": "development executor",
