@@ -20,7 +20,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-WORKSPACE = Path(__file__).parent.parent.parent  # ~/.openclaw/workspace
+import argparse as _argparse
+_ws_parser = _argparse.ArgumentParser(add_help=False)
+_ws_parser.add_argument("--workspace", default=None, help="Path to OpenClaw workspace root")
+_ws_args, _ = _ws_parser.parse_known_args()
+WORKSPACE = Path(
+    _ws_args.workspace
+    or os.environ.get("OPENCLAW_WORKSPACE")
+    or str(Path.home() / ".openclaw" / "workspace")
+)
 RUNTIME   = WORKSPACE / "runtime"
 STATIC    = Path(__file__).parent / "static"
 BOOKMARKER_WORKSPACE = WORKSPACE.parent / "workspace-bookmarker"
