@@ -976,11 +976,17 @@ function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
   const leftPad = 28, rightPad = 6, padY = 6, botPad = 18;
   const chartW = w - leftPad - rightPad;
   const chartH = h - padY - botPad;
-  const valid = values.map((v, i) => ({ v: numericOrNull(v), i })).filter(p => p.v !== null);
-  if (!valid.length) return `<svg viewBox="0 0 ${w} ${h}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="9">${t('no-tas-history')}</text></svg>`;
+  const all = values.map((v, i) => ({ v: numericOrNull(v), i, ok: !statuses || !statuses[i] || statuses[i] === 'ok' }));
+  // Primary points: ok status AND non-null value — these form the main line
+  const primary = all.filter(p => p.v !== null && p.ok);
+  // Diagnostic points: non-null value but degraded status — overlay only
+  const diagnostic = all.filter(p => p.v !== null && !p.ok);
+  if (!primary.length && !diagnostic.length) return `<svg viewBox="0 0 ${w} ${h}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="9">${t('no-tas-history')}</text></svg>`;
 
-  const rawMin = Math.min(...valid.map(p => p.v));
-  const rawMax = Math.max(...valid.map(p => p.v));
+  // Y-axis range from primary points only (diagnostic points do not distort the scale)
+  const rangeSource = primary.length ? primary : diagnostic;
+  const rawMin = Math.min(...rangeSource.map(p => p.v));
+  const rawMax = Math.max(...rangeSource.map(p => p.v));
   const span = Math.max(rawMax - rawMin, 0.01);
   const yMin = Math.max(0, rawMin - span * 0.15);
   const yMax = rawMax + span * 0.15;
@@ -989,15 +995,29 @@ function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
   const toX = i => leftPad + (i / count) * chartW;
   const toY = v => padY + chartH - ((v - yMin) / ySpan) * chartH;
   const baseY = padY + chartH;
-  const linePts = valid.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
-  const areaPath = `${linePts.join(' ')} ${toX(valid[valid.length - 1].i).toFixed(1)},${baseY.toFixed(1)} ${toX(valid[0].i).toFixed(1)},${baseY.toFixed(1)}`;
   const hexToRgb = h => { const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h); return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '255,255,255'; };
   const rgb = hexToRgb(color);
-  // P3 2026-04-10: degraded/partial points rendered as hollow rings with lower opacity
-  const dots = valid.map(p => {
-    const isOk = !statuses || !statuses[p.i] || statuses[p.i] === 'ok';
-    if (isOk) return `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2" fill="${color}" opacity="0.9"/>`;
-    return `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2.5" fill="none" stroke="${color}" stroke-width="1" opacity="0.4"/>`
+
+  // Main polyline + area: primary points only
+  let mainLine = '', mainArea = '';
+  if (primary.length >= 2) {
+    const linePts = primary.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
+    mainLine = `<polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePts.join(' ')}"/>`;
+    const areaPath = `${linePts.join(' ')} ${toX(primary[primary.length - 1].i).toFixed(1)},${baseY.toFixed(1)} ${toX(primary[0].i).toFixed(1)},${baseY.toFixed(1)}`;
+    mainArea = `<polygon points="${areaPath}" fill="url(#sg-${rgb.replace(/,/g,'-')})"/>`;
+  } else if (primary.length === 1) {
+    mainLine = `<circle cx="${toX(primary[0].i).toFixed(1)}" cy="${toY(primary[0].v).toFixed(1)}" r="3" fill="${color}" opacity="0.9"/>`;
+  }
+
+  // Dots: only last primary point gets a filled dot; diagnostic points get hollow rings
+  let dots = '';
+  if (primary.length) {
+    const last = primary[primary.length - 1];
+    dots += `<circle cx="${toX(last.i).toFixed(1)}" cy="${toY(last.v).toFixed(1)}" r="2.5" fill="${color}" opacity="0.9"/>`;
+  }
+  dots += diagnostic.map(p => {
+    const cy = toY(Math.max(yMin, Math.min(yMax, p.v)));
+    return `<circle cx="${toX(p.i).toFixed(1)}" cy="${cy.toFixed(1)}" r="2.5" fill="none" stroke="${color}" stroke-width="1" opacity="0.3"/>`
       + `<title>${statuses[p.i]}</title>`;
   }).join('');
 
@@ -1036,8 +1056,8 @@ function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
     <defs><linearGradient id="sg-${rgb.replace(/,/g,'-')}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.25"/><stop offset="100%" stop-color="${color}" stop-opacity="0.03"/></linearGradient></defs>
     ${gridLines}
     <line x1="${leftPad}" y1="${baseY.toFixed(1)}" x2="${(leftPad + chartW).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-    <polygon points="${areaPath}" fill="url(#sg-${rgb.replace(/,/g,'-')})"/>
-    <polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePts.join(' ')}"/>
+    ${mainArea}
+    ${mainLine}
     ${dots}
     ${yLabels}
     ${yTitle}
@@ -1248,16 +1268,21 @@ function renderTasCommandCenter(data) {
   const trade = numericOrNull(tas.tas_trade);
   const total = numericOrNull(tas.tas_total);
 
-  // Previous values from history
-  const prev = history.length >= 2 ? history[history.length - 2] : {};
+  // Eligible points: status === 'ok' (or missing) with valid tas_total
+  const eligible = history.filter(p => (!p.status || p.status === 'ok') && p.history_eligible !== false && numericOrNull(p.tas_total) !== null);
+  const latestEligible = eligible.length ? eligible[eligible.length - 1] : null;
+  const prevEligible = eligible.length >= 2 ? eligible[eligible.length - 2] : null;
+
+  // Center TAS: use latest eligible point if current is degraded
+  const displayTotal = (total !== null && (!tas.status || tas.status === 'ok')) ? total : (latestEligible ? numericOrNull(latestEligible.tas_total) : total);
 
   // Center column
   const ccTotal = $('cc-tas-total');
   if (ccTotal) {
-    ccTotal.textContent = total !== null ? fmt(total) : '—';
-    ccTotal.className = 'big-num jumbo ' + (total >= 1.5 ? 'clr-ok' : total >= 0.8 ? 'clr-warn' : 'clr-error');
+    ccTotal.textContent = displayTotal !== null ? fmt(displayTotal) : '—';
+    ccTotal.className = 'big-num jumbo ' + (displayTotal >= 1.5 ? 'clr-ok' : displayTotal >= 0.8 ? 'clr-warn' : 'clr-error');
   }
-  const trendT = trendArrow(total, numericOrNull(prev.tas_total));
+  const trendT = trendArrow(latestEligible ? numericOrNull(latestEligible.tas_total) : displayTotal, prevEligible ? numericOrNull(prevEligible.tas_total) : null);
   const trendTEl = $('cc-tas-total-trend');
   if (trendTEl) { trendTEl.textContent = trendT.arrow; trendTEl.className = 'trend-arrow ' + trendT.cls; }
 
@@ -1284,7 +1309,7 @@ function renderTasCommandCenter(data) {
   if (legendEl) {
     const degradedCount = pts.filter(p => p.status && p.status !== 'ok').length;
     legendEl.textContent = degradedCount > 0
-      ? (_lang === 'zh' ? `${degradedCount} 个降级/不完整数据点（空心圆），不参与趋势计算` : `${degradedCount} degraded/partial point(s) (hollow dots) excluded from trend`)
+      ? (_lang === 'zh' ? `${degradedCount} 个降级/不完整数据点（空心圆），不参与主线、趋势和 y 轴范围` : `${degradedCount} degraded/partial point(s) (hollow dots) excluded from main line, trend & y-axis`)
       : '';
   }
 
@@ -1294,7 +1319,7 @@ function renderTasCommandCenter(data) {
     ccSocial.textContent = social !== null ? fmt(social) : '—';
     ccSocial.className = 'big-num ' + (social >= 1.5 ? 'clr-ok' : social >= 0.8 ? 'clr-warn' : 'clr-error');
   }
-  const trendS = trendArrow(social, numericOrNull(prev.tas_social));
+  const trendS = trendArrow(social, prevEligible ? numericOrNull(prevEligible.tas_social) : null);
   const trendSEl = $('cc-tas-social-trend');
   if (trendSEl) { trendSEl.textContent = trendS.arrow; trendSEl.className = 'trend-arrow small ' + trendS.cls; }
 
@@ -1324,7 +1349,7 @@ function renderTasCommandCenter(data) {
   // the 24h rolling window likely has no new owner-interaction delta.
   const flatNoteEl = $('cc-social-flat-note');
   if (flatNoteEl) {
-    const socialVals = pts.map(p => numericOrNull(p.tas_social)).filter(v => v !== null);
+    const socialVals = pts.filter(p => !p.status || p.status === 'ok').map(p => numericOrNull(p.tas_social)).filter(v => v !== null);
     const tailLen = Math.min(socialVals.length, 5);
     const tail = socialVals.slice(-tailLen);
     const isFlat = tailLen >= 3 && tail.every(v => v === tail[0]);
@@ -1345,7 +1370,7 @@ function renderTasCommandCenter(data) {
     ccTrade.textContent = trade !== null ? (fmt(trade) + (_tradeIsDegraded ? ' ⚠' : '')) : '—';
     ccTrade.className = 'big-num ' + (trade >= 1.5 ? 'clr-ok' : trade >= 0.8 ? 'clr-warn' : 'clr-error') + (_tradeIsDegraded ? ' degraded' : '');
   }
-  const trendTr = trendArrow(trade, numericOrNull(prev.tas_trade));
+  const trendTr = trendArrow(trade, prevEligible ? numericOrNull(prevEligible.tas_trade) : null);
   const trendTrEl = $('cc-tas-trade-trend');
   if (trendTrEl) { trendTrEl.textContent = trendTr.arrow; trendTrEl.className = 'trend-arrow small ' + trendTr.cls; }
 
