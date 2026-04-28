@@ -790,13 +790,17 @@ function setText(id, val, fallback = '—') {
   if (el) el.textContent = (val !== null && val !== undefined && val !== '') ? String(val) : fallback;
 }
 
+function isMissingNumeric(n) {
+  return n === null || n === undefined || n === '' || n === 'null' || n === 'unavailable' || Number.isNaN(parseFloat(n));
+}
+
 function fmt(n, dec = 2) {
-  if (n === null || n === undefined || n === '') return '—';
+  if (isMissingNumeric(n)) return '—';
   return parseFloat(n).toFixed(dec);
 }
 
 function fmtNum(n) {
-  if (n === null || n === undefined) return '—';
+  if (isMissingNumeric(n)) return '—';
   const v = parseFloat(n);
   if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
   if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
@@ -928,10 +932,46 @@ function hoursAgoText(ts) {
 }
 
 // ── API ────────────────────────────────────────────────────────────────────
-async function fetchJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  return res.json();
+async function fetchJSON(url, opts = {}) {
+  const {
+    retries = 2,
+    retryDelayMs = 600,
+    retryStatuses = [400, 408, 425, 429, 500, 502, 503, 504],
+  } = opts;
+
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers: { 'cache-control': 'no-cache' },
+      });
+      if (!res.ok) {
+        const err = new Error(`${res.status} ${url}`);
+        err.status = res.status;
+        throw err;
+      }
+      return res.json();
+    } catch (err) {
+      lastErr = err;
+      const status = Number(err && err.status);
+      const canRetry =
+        attempt < retries &&
+        (!Number.isFinite(status) || retryStatuses.includes(status));
+      if (!canRetry) break;
+      await new Promise(resolve => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+    }
+  }
+
+  throw lastErr || new Error(`fetch failed: ${url}`);
+}
+
+async function fetchOptionalJSON(url, fallback = null) {
+  try {
+    return await fetchJSON(url);
+  } catch {
+    return fallback;
+  }
 }
 
 // ── Agent Tab Switching ───────────────────────────────────────────────────
@@ -1299,7 +1339,7 @@ function renderTasCommandCenter(data) {
   const sparkEl = $('cc-sparkline');
   let pts = [];
   if (sparkEl) {
-    const cutoffMs = Date.now() - 72 * 60 * 60 * 1000;
+    const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
     pts = history.filter(p => { try { return new Date(p.ts).getTime() >= cutoffMs; } catch { return false; } });
     if (pts.length < 5) pts = history.slice(-12);
     sparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_total), '#00d26a', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
@@ -1540,7 +1580,12 @@ function renderBookmarkerTab(bm) {
   const draftsEl = $('bm-drafts-list');
   if (draftsEl) {
     if (!drafts.length) {
-      draftsEl.innerHTML = '<div class="muted small">No drafts</div>';
+      const moveCount = ((draftsObj.meta || {}).social_move_count || 0);
+      const draftStatus = draftsObj.status || '';
+      const emptyLabel = (draftStatus === 'stale' && moveCount > 0)
+        ? 'No queued drafts (already consumed / executed)'
+        : 'No drafts';
+      draftsEl.innerHTML = `<div class="muted small">${escHtml(emptyLabel)}</div>`;
     } else {
       draftsEl.innerHTML = drafts.map(d => {
         const txt = (d.text || '').slice(0, 100) + ((d.text || '').length > 100 ? '…' : '');
@@ -1602,7 +1647,11 @@ function renderBookmarkerTab(bm) {
     const dObj = bm.social_drafts || {};
     const dList = dObj.drafts || [];
     if (!dList.length) {
-      pipeDrafts.innerHTML = '<div class="muted small">No drafts</div>';
+      const moveCount = ((dObj.meta || {}).social_move_count || 0);
+      const emptyLabel = (dObj.status === 'stale' && moveCount > 0)
+        ? 'Draft queue empty (work already consumed)'
+        : 'No drafts';
+      pipeDrafts.innerHTML = `<div class="muted small">${escHtml(emptyLabel)}</div>`;
     } else {
       pipeDrafts.innerHTML = renderMiniFeed(dList.map(d => ({
         title: (d.text || '').slice(0, 72) + ((d.text || '').length > 72 ? '…' : ''),
@@ -1649,7 +1698,7 @@ function renderTraderTab(trader) {
       balEl.innerHTML = addressRow + totalRow + rows;
     } else {
       const bals = wallet.balances || {};
-      const items = Object.entries(bals).map(([tick, amt]) => ({ title: tick, right: fmtNum(parseFloat(amt)) }));
+      const items = Object.entries(bals).map(([tick, amt]) => ({ title: tick, right: fmtNum(amt) }));
       const balanceHtml = items.length ? listHtml(items) : `<div class="muted small">${t('no-balance')}</div>`;
       balEl.innerHTML = addressRow + balanceHtml;
     }
@@ -1662,26 +1711,42 @@ function renderTraderTab(trader) {
     if (!claimable.length) {
       rewEl.innerHTML = `<div class="muted small">${t('no-rewards')}</div>`;
     } else {
-      rewEl.innerHTML = listHtml(claimable.map(r => ({
-        title: r.tick,
-        sub: r.status || r.action || '',
-        right: `${fmtNum(r.claimable_amount)} ($${fmt(r.reward_value_usd)})`,
-      })));
+      rewEl.innerHTML = listHtml(claimable.map(r => {
+        const usdLabel = isMissingNumeric(r.reward_value_usd) ? 'price unavailable' : `$${fmt(r.reward_value_usd)}`;
+        return {
+          title: r.tick,
+          sub: r.status || r.action || '',
+          right: `${fmtNum(r.claimable_amount)} (${usdLabel})`,
+        };
+      }));
     }
   }
 
   // Claimable big + threshold bar
   const claimBig = $('trader-claimable-big');
   if (claimBig) {
-    const usd = tasT.claimable_usd_raw;
-    claimBig.textContent = usd != null ? '$' + fmt(usd) : '—';
-    claimBig.className = 'v mono bold ' + (usd >= 2 ? 'clr-ok' : 'clr-warn');
+    const claimable = rewards.claimable || [];
+    const hasUnpricedClaimable = claimable.some(r => !isMissingNumeric(r.claimable_amount) && isMissingNumeric(r.reward_value_usd));
+    const usd = !isMissingNumeric(tasT.claimable_usd_raw) ? tasT.claimable_usd_raw : rewards.claimable_usd_total;
+    if (hasUnpricedClaimable && (!usd || parseFloat(usd) === 0)) {
+      claimBig.textContent = '—';
+      claimBig.className = 'v mono bold clr-warn';
+    } else {
+      claimBig.textContent = !isMissingNumeric(usd) ? '$' + fmt(usd) : '—';
+      claimBig.className = 'v mono bold ' + (parseFloat(usd || 0) >= 2 ? 'clr-ok' : 'clr-warn');
+    }
   }
   const claimBar = $('trader-claim-progress');
   if (claimBar) {
-    const usd = tasT.claimable_usd_raw || 0;
-    const pct = Math.min(100, (usd / 2) * 100);
-    claimBar.innerHTML = `<div class="pob-bar-fill ${pct >= 100 ? 'pob-bar-green' : 'pob-bar-yellow'}" style="width:${pct.toFixed(1)}%"></div>`;
+    const claimable = rewards.claimable || [];
+    const hasUnpricedClaimable = claimable.some(r => !isMissingNumeric(r.claimable_amount) && isMissingNumeric(r.reward_value_usd));
+    const usd = !isMissingNumeric(tasT.claimable_usd_raw) ? parseFloat(tasT.claimable_usd_raw) : parseFloat(rewards.claimable_usd_total || 0);
+    if (hasUnpricedClaimable && (!usd || Number.isNaN(usd))) {
+      claimBar.innerHTML = `<div class="muted small">USD unavailable</div>`;
+    } else {
+      const pct = Math.min(100, (usd / 2) * 100);
+      claimBar.innerHTML = `<div class="pob-bar-fill ${pct >= 100 ? 'pob-bar-green' : 'pob-bar-yellow'}" style="width:${pct.toFixed(1)}%"></div>`;
+    }
   }
 
   // Risk flags
@@ -3241,38 +3306,70 @@ function _renderExplainEvents(events) {
 // Main fetch loop
 // ══════════════════════════════════════════════════════════════════════════
 async function fetchAll() {
+  const errors = [];
+  let status = _lastStatus;
+  let timeline = _lastTimeline;
+
   try {
-    const [status, timeline, autoresearch, controlTower, agentHealth, noc, explainability] = await Promise.all([
-      fetchJSON('/api/status'),
-      fetchJSON('/api/timeline'),
-      fetchJSON('/api/autoresearch').catch(() => null),
-      fetchJSON('/api/control-tower').catch(() => null),
-      fetchJSON('/api/agent-health').catch(() => null),
-      fetchJSON('/api/noc').catch(() => null),
-      fetchJSON('/api/explainability').catch(() => null),
-    ]);
+    status = await fetchJSON('/api/status');
     _lastStatus = status;
-    _lastTimeline = timeline;
-    _lastAutoResearch = autoresearch;
-    _lastControlTower = controlTower;
-    _lastAgentHealth = agentHealth;
-    _lastNoc = noc;
-    _lastExplainability = explainability;
-    renderStatus(status);
-    renderTimeline(timeline);
-    if (autoresearch) renderAutoResearch(autoresearch);
-    if (controlTower) renderControlTower(controlTower);
-    if (agentHealth) renderAgentHealth(agentHealth);
-    if (noc) renderNoc(noc);
-    if (explainability) renderExplainability(explainability);
-    renderHeroBar(controlTower, timeline, agentHealth, status);
-    renderNextPostPreview(status);
-    translateDomTextNodes();
-    // renderAgentQuickCards removed (cards deleted from UI)
   } catch (e) {
-    showError(t('fetch-error') + e.message);
-    console.error(e);
+    errors.push(`/api/status: ${e.message}`);
   }
+
+  try {
+    timeline = await fetchJSON('/api/timeline');
+    _lastTimeline = timeline;
+  } catch (e) {
+    errors.push(`/api/timeline: ${e.message}`);
+  }
+
+  const [
+    autoresearch,
+    controlTower,
+    agentHealth,
+    noc,
+    explainability,
+  ] = await Promise.all([
+    fetchOptionalJSON('/api/autoresearch', _lastAutoResearch),
+    fetchOptionalJSON('/api/control-tower', _lastControlTower),
+    fetchOptionalJSON('/api/agent-health', _lastAgentHealth),
+    fetchOptionalJSON('/api/noc', _lastNoc),
+    fetchOptionalJSON('/api/explainability', _lastExplainability),
+  ]);
+
+  _lastAutoResearch = autoresearch;
+  _lastControlTower = controlTower;
+  _lastAgentHealth = agentHealth;
+  _lastNoc = noc;
+  _lastExplainability = explainability;
+
+  if (!status && !timeline) {
+    const msg = errors[0] || t('fetch-error');
+    showError(t('fetch-error') + msg);
+    console.error('dashboard fetch failed:', errors);
+    return;
+  }
+
+  if (status) renderStatus(status);
+  if (timeline) renderTimeline(timeline);
+  if (autoresearch) renderAutoResearch(autoresearch);
+  if (controlTower) renderControlTower(controlTower);
+  if (agentHealth) renderAgentHealth(agentHealth);
+  if (noc) renderNoc(noc);
+  if (explainability) renderExplainability(explainability);
+  renderHeroBar(controlTower, timeline, agentHealth, status);
+  renderNextPostPreview(status);
+  translateDomTextNodes();
+
+  if (errors.length) {
+    showError(langText(
+      '部分数据刷新失败，已显示最近一次可用结果',
+      'Partial refresh failed; showing the latest available data',
+    ));
+    console.warn('dashboard partial fetch errors:', errors);
+  }
+  // renderAgentQuickCards removed (cards deleted from UI)
 }
 
 // Auto-refresh every 30 seconds

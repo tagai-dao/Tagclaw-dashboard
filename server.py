@@ -534,8 +534,22 @@ def _load_wiki_status() -> dict:
     ingest_pipeline[6]["has_findings"] = lint_fm.get("broken_links_count", 0) > 0
 
     # ── Agent Wiki Status ──
+    def _normalize_wiki_fields(wiki: dict) -> dict:
+        wiki = dict(wiki or {})
+        # The runtime currently overloads "platform available" with "fresh within 7 days".
+        # For the dashboard we want availability to mean the platform snapshot exists, while
+        # staleness remains visible through snapshot age fields.
+        has_platform_snapshot = bool(
+            wiki.get("wiki_platform_snapshot_age_hours") is not None
+            or (wiki.get("wiki_trending_ticks") or [])
+        )
+        if has_platform_snapshot:
+            wiki["wiki_platform_available"] = True
+        return wiki
+
     def _wiki_fields(data: dict) -> dict:
-        return {k: v for k, v in data.items() if k.startswith("wiki_")}
+        wiki = {k: v for k, v in data.items() if k.startswith("wiki_")}
+        return _normalize_wiki_fields(wiki)
 
     main_latest = _load(RUNTIME / "main" / "latest.json") or {}
     bm_latest = _load(RUNTIME / "bookmarker" / "latest.json") or {}
@@ -544,7 +558,7 @@ def _load_wiki_status() -> dict:
     agent_wiki_status = {
         "main": _wiki_fields(main_latest),
         "bookmarker": _wiki_fields(bm_latest),
-        "trader": trader_latest.get("wiki") or _wiki_fields(trader_latest),
+        "trader": _normalize_wiki_fields(trader_latest.get("wiki") or _wiki_fields(trader_latest)),
     }
 
     # ── Lint Summary ──
@@ -1156,37 +1170,88 @@ def _load_twin_recognition() -> dict:
 
 
 def _load_x_sync() -> dict:
-    """Read x-sync status and timestamp, preferring bookmarker runtime over memory."""
-    runtime_path = Path(__file__).parent.parent.parent / 'runtime' / 'bookmarker' / 'latest.json'
-    memory_path = WORKSPACE / "memory" / "x-sync-latest.json"
+    """Read x-sync status/timestamp/source, preferring canonical workspace runtime + memory artifacts."""
+    runtime_path = RUNTIME / 'bookmarker' / 'latest.json'
+    memory_path = WORKSPACE / 'memory' / 'x-sync-latest.json'
 
     runtime_at = ''
     runtime_status = 'unknown'
+    runtime_source = None
+    runtime_module_statuses: dict[str, Any] = {}
     if runtime_path.exists():
         try:
             r = json.loads(runtime_path.read_text())
             runtime_at = r.get('updated_at') or r.get('generated_at') or ''
             runtime_status = r.get('status') or 'unknown'
+            runtime_source = (r.get('meta') or {}).get('selected_source')
+            runtime_module_statuses = (r.get('meta') or {}).get('module_statuses') or {}
         except Exception:
             pass
 
     memory_at = ''
     memory_status = 'unknown'
+    memory_source = None
+    memory_module_statuses: dict[str, Any] = {}
     if memory_path.exists():
         try:
             m = json.loads(memory_path.read_text())
             memory_at = m.get('fetched_at') or ''
             memory_status = m.get('status') or 'unknown'
+            memory_source = m.get('source')
+            memory_module_statuses = m.get('module_statuses') or {}
         except Exception:
             pass
 
-    best_at = runtime_at if runtime_at >= memory_at else memory_at
-    best_status = runtime_status if runtime_at >= memory_at else memory_status
+    use_runtime = runtime_at >= memory_at
+    best_at = runtime_at if use_runtime else memory_at
+    best_status = runtime_status if use_runtime else memory_status
+    best_source = runtime_source if use_runtime else memory_source
+    best_module_statuses = runtime_module_statuses if use_runtime else memory_module_statuses
 
     return {
         'x_sync_status': best_status,
         'x_sync_at': best_at,
+        'x_sync_source': best_source,
+        'x_sync_module_statuses': best_module_statuses,
     }
+
+
+def _effective_bookmarker_source_health(
+    source_health: dict[str, Any],
+    x_sync: dict[str, Any],
+    latest: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Normalize bookmarker source health for dashboard use.
+
+    Prefer effective X-sync outcome over raw per-source probe artifacts, because a
+    degraded xurl/bird probe can coexist with a healthy browser-relay/xurl sync.
+    """
+    latest = latest or {}
+    out = dict(source_health or {})
+    x_status = x_sync.get('x_sync_status') or 'unknown'
+    x_source = x_sync.get('x_sync_source') or (latest.get('meta') or {}).get('selected_source')
+    module_statuses = x_sync.get('x_sync_module_statuses') or {}
+
+    effective_status = out.get('status') or out.get('bird') or 'unknown'
+    if x_status == 'ok':
+        effective_status = 'ok'
+    elif effective_status in (None, '', 'unknown'):
+        effective_status = x_status
+
+    out['status'] = effective_status
+    out['effective_source'] = x_source or out.get('effective_source')
+    out['effective_updated_at'] = x_sync.get('x_sync_at') or out.get('updated_at')
+    out['x_sync'] = {
+        'status': x_status,
+        'source': x_source,
+        'updated_at': x_sync.get('x_sync_at'),
+        'module_statuses': module_statuses,
+    }
+
+    if x_source and x_status == 'ok':
+        out[x_source.replace('-', '_')] = 'ok'
+
+    return out
 
 
 # ── Trader event filter (module-level for reuse) ───────────────────────────
@@ -1280,15 +1345,17 @@ def _build_bookmarker_social_pipeline(
 ) -> dict:
     """Build bookmarker social execution pipeline summary for dashboard (6-step v2)."""
     # Step 1: X Sync
-    sh_status = source_health.get("bird") or source_health.get("status") or "—"
+    x_sync = source_health.get("x_sync") or {}
+    sh_status = x_sync.get("status") or source_health.get("status") or source_health.get("bird") or "—"
     sh_source = source_health.get("source_class", "—")
-    sh_updated = source_health.get("updated_at", "")
+    sh_updated = x_sync.get("updated_at") or source_health.get("effective_updated_at") or source_health.get("updated_at", "")
     # Determine primary active source
-    active_src = "—"
-    for src_key in ("bird", "browser_relay", "xurl"):
-        if source_health.get(src_key) == "ok":
-            active_src = src_key
-            break
+    active_src = x_sync.get("source") or source_health.get("effective_source") or "—"
+    if active_src == "—":
+        for src_key in ("xurl", "browser_relay", "bird"):
+            if source_health.get(src_key) == "ok":
+                active_src = src_key
+                break
 
     # Step 2: Topic Brief
     tb_keywords = topic_brief.get("keywords") or []
@@ -1312,6 +1379,13 @@ def _build_bookmarker_social_pipeline(
         draft_types[dt] = draft_types.get(dt, 0) + 1
     drafts_meta = drafts.get("meta") or {}
     x_items_seen = drafts_meta.get("x_items_seen", 0)
+    draft_stage_fresh = _freshness_bucket(drafts.get("updated_at"), "runtime") not in ("stale", "critical")
+    draft_stage_has_work = bool(
+        draft_list
+        or (drafts_meta.get("social_move_count") or 0) > 0
+        or (drafts_meta.get("publishable_claim_count") or 0) > 0
+        or ((execution.get("summary") or {}).get("attempted") or 0) > 0
+    )
 
     # Step 5: Autonomy Intent
     ai_mode = auto_intent.get("mode", "—")
@@ -1383,8 +1457,15 @@ def _build_bookmarker_social_pipeline(
             {
                 "id": "social_drafts",
                 "label": "Social Drafts",
-                "status": "ok" if draft_list else "empty",
-                "data": {"count": len(draft_list), "types": draft_types, "x_items_seen": x_items_seen},
+                "status": "ok" if draft_stage_has_work and draft_stage_fresh else ("empty" if draft_stage_fresh else "stale"),
+                "data": {
+                    "count": len(draft_list),
+                    "types": draft_types,
+                    "x_items_seen": x_items_seen,
+                    "planner_mode": drafts_meta.get("planner_mode"),
+                    "social_move_count": drafts_meta.get("social_move_count", 0),
+                    "publishable_claim_count": drafts_meta.get("publishable_claim_count", 0),
+                },
             },
             {
                 "id": "autonomy_intent",
@@ -1604,7 +1685,10 @@ def api_status():
 
     # ── Bookmarker ──
     topic_brief  = _safe("bookmarker/topic-brief.json")         or {}
-    src_health   = _safe("bookmarker/source-health.json")       or {}
+    src_health_raw = _safe("bookmarker/source-health.json")     or {}
+    bm_latest    = _safe("bookmarker/latest.json")              or {}
+    x_sync_info  = _load_x_sync()
+    src_health   = _effective_bookmarker_source_health(src_health_raw, x_sync_info, bm_latest)
     bm_cands     = _safe("bookmarker/content-candidates.json")  or {}
     bm_topic_perf = _safe("bookmarker/topic-performance.json")  or {}
     auto_intent  = _safe("bookmarker/autonomy-intent.json")     or {}
@@ -1689,7 +1773,7 @@ def api_status():
             "x_bookmarks":          (_xb := _parse_x_bookmarks(hours=24, limit=20)),
             "x_bookmarks_window":   "24h" if _xb and _xb[0].get("date") and
                                     _is_within_hours(_xb[0].get("date",""), 24) else "recent",
-            **_load_x_sync(),
+            **x_sync_info,
             "twin_recognition": _load_twin_recognition(),
             "tas_social_detail": {
                 "align_score":         tas_social_data.get("align_score"),
@@ -2348,7 +2432,10 @@ def api_agent_health():
     treasury = _safe("main/treasury-policy.json") or {}
     tas_social_data = _safe("bookmarker/tas-social.json") or {}
     topic_brief = _safe("bookmarker/topic-brief.json") or {}
-    source_health = _safe("bookmarker/source-health.json") or {}
+    source_health_raw = _safe("bookmarker/source-health.json") or {}
+    bm_latest = _safe("bookmarker/latest.json") or {}
+    x_sync_info = _load_x_sync()
+    source_health = _effective_bookmarker_source_health(source_health_raw, x_sync_info, bm_latest)
     align_events = _safe("bookmarker/align-hook-state.json") or {}
     tas_trade = _safe("trader/tas-trade.json") or {}
     reward_status = _safe("trader/reward-status.json") or {}
@@ -2369,7 +2456,7 @@ def api_agent_health():
         "tas_trade": tas_latest.get("tas_trade"),
         "community_heat_health": (community_heat.get("source_health") or "unavailable"),
         "topic_brief_keywords": (topic_brief.get("keywords") or [])[:5],
-        "source_health_status": source_health.get("bird") or source_health.get("status") or "unknown",
+        "source_health_status": (source_health.get("x_sync") or {}).get("status") or source_health.get("status") or source_health.get("bird") or "unknown",
     }
 
     # ── Decide lane ──
@@ -2430,7 +2517,7 @@ def api_agent_health():
 
     # Bookmarker
     tb_fresh = _freshness_bucket(topic_brief.get("generated_at") or topic_brief.get("updated_at"), "runtime")
-    sh_status = source_health.get("bird") or source_health.get("status") or "unknown"
+    sh_status = (source_health.get("x_sync") or {}).get("status") or source_health.get("status") or source_health.get("bird") or "unknown"
     bm_freshness = tb_fresh
 
     tas_social_val = tas_latest.get("tas_social")
