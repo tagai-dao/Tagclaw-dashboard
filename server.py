@@ -838,7 +838,11 @@ def _load_tas_history(limit: int = 50, strategy_cycle_count: int | None = None, 
                             "cycle_count": _to_int(obj.get("cycle_count")),
                             # P3 2026-04-10: pass status metadata for chart rendering
                             "status": obj.get("status", "ok"),
+                            "tas_social_status": obj.get("tas_social_status"),
+                            "tas_trade_status": obj.get("tas_trade_status"),
                             "history_eligible": obj.get("history_eligible", True),
+                            "tas_social_history_eligible": obj.get("tas_social_history_eligible"),
+                            "tas_trade_history_eligible": obj.get("tas_trade_history_eligible"),
                         })
                 except Exception:
                     continue

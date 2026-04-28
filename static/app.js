@@ -1380,10 +1380,16 @@ function renderTasCommandCenter(data) {
   _populateCommunityDetail(socialDetail);
   _populatePobDetail(socialDetail);
 
-  // TAS_social sparkline (same style as Aggregated TAS)
+  // TAS_social sparkline — use TAS_social-specific status, not aggregate TAS status.
   const socialSparkEl = $('cc-social-sparkline');
   if (socialSparkEl && pts.length) {
-    socialSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_social), '#58a6ff', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
+    const socialStatuses = pts.map(p => {
+      if (p.tas_social_status) return p.tas_social_status;
+      // Legacy fallback: if TAS_social has a numeric value, treat it as its own valid point
+      // even when aggregate TAS was degraded only because TAS_trade was unavailable.
+      return numericOrNull(p.tas_social) !== null ? 'ok' : (p.status || 'ok');
+    });
+    socialSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_social), '#58a6ff', 300, 70, pts.map(p => p.ts), socialStatuses);
   }
   // P4 2026-04-10: explain TAS_social flat lines — when the last N points have identical values,
   // the 24h rolling window likely has no new owner-interaction delta.
@@ -1425,10 +1431,14 @@ function renderTasCommandCenter(data) {
   _populateClaimableNormDetail(tradeD);
   _populatePobRewardDetail(tradeD);
 
-  // TAS_trade sparkline (same style as Aggregated TAS)
+  // TAS_trade sparkline — use TAS_trade-specific status.
   const tradeSparkEl = $('cc-trade-sparkline');
   if (tradeSparkEl && pts.length) {
-    tradeSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_trade), '#f0a500', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
+    const tradeStatuses = pts.map(p => {
+      if (p.tas_trade_status) return p.tas_trade_status;
+      return numericOrNull(p.tas_trade) !== null ? (p.status || 'ok') : 'missing';
+    });
+    tradeSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_trade), '#f0a500', 300, 70, pts.map(p => p.ts), tradeStatuses);
   }
 }
 
