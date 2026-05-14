@@ -790,13 +790,17 @@ function setText(id, val, fallback = '—') {
   if (el) el.textContent = (val !== null && val !== undefined && val !== '') ? String(val) : fallback;
 }
 
+function isMissingNumeric(n) {
+  return n === null || n === undefined || n === '' || n === 'null' || n === 'unavailable' || Number.isNaN(parseFloat(n));
+}
+
 function fmt(n, dec = 2) {
-  if (n === null || n === undefined || n === '') return '—';
+  if (isMissingNumeric(n)) return '—';
   return parseFloat(n).toFixed(dec);
 }
 
 function fmtNum(n) {
-  if (n === null || n === undefined) return '—';
+  if (isMissingNumeric(n)) return '—';
   const v = parseFloat(n);
   if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
   if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
@@ -928,10 +932,46 @@ function hoursAgoText(ts) {
 }
 
 // ── API ────────────────────────────────────────────────────────────────────
-async function fetchJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  return res.json();
+async function fetchJSON(url, opts = {}) {
+  const {
+    retries = 2,
+    retryDelayMs = 600,
+    retryStatuses = [400, 408, 425, 429, 500, 502, 503, 504],
+  } = opts;
+
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers: { 'cache-control': 'no-cache' },
+      });
+      if (!res.ok) {
+        const err = new Error(`${res.status} ${url}`);
+        err.status = res.status;
+        throw err;
+      }
+      return res.json();
+    } catch (err) {
+      lastErr = err;
+      const status = Number(err && err.status);
+      const canRetry =
+        attempt < retries &&
+        (!Number.isFinite(status) || retryStatuses.includes(status));
+      if (!canRetry) break;
+      await new Promise(resolve => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+    }
+  }
+
+  throw lastErr || new Error(`fetch failed: ${url}`);
+}
+
+async function fetchOptionalJSON(url, fallback = null) {
+  try {
+    return await fetchJSON(url);
+  } catch {
+    return fallback;
+  }
 }
 
 // ── Agent Tab Switching ───────────────────────────────────────────────────
@@ -976,11 +1016,17 @@ function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
   const leftPad = 28, rightPad = 6, padY = 6, botPad = 18;
   const chartW = w - leftPad - rightPad;
   const chartH = h - padY - botPad;
-  const valid = values.map((v, i) => ({ v: numericOrNull(v), i })).filter(p => p.v !== null);
-  if (!valid.length) return `<svg viewBox="0 0 ${w} ${h}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="9">${t('no-tas-history')}</text></svg>`;
+  const all = values.map((v, i) => ({ v: numericOrNull(v), i, ok: !statuses || !statuses[i] || statuses[i] === 'ok' }));
+  // Primary points: ok status AND non-null value — these form the main line
+  const primary = all.filter(p => p.v !== null && p.ok);
+  // Diagnostic points: non-null value but degraded status — overlay only
+  const diagnostic = all.filter(p => p.v !== null && !p.ok);
+  if (!primary.length && !diagnostic.length) return `<svg viewBox="0 0 ${w} ${h}" class="tas-sparkline"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="9">${t('no-tas-history')}</text></svg>`;
 
-  const rawMin = Math.min(...valid.map(p => p.v));
-  const rawMax = Math.max(...valid.map(p => p.v));
+  // Y-axis range from primary points only (diagnostic points do not distort the scale)
+  const rangeSource = primary.length ? primary : diagnostic;
+  const rawMin = Math.min(...rangeSource.map(p => p.v));
+  const rawMax = Math.max(...rangeSource.map(p => p.v));
   const span = Math.max(rawMax - rawMin, 0.01);
   const yMin = Math.max(0, rawMin - span * 0.15);
   const yMax = rawMax + span * 0.15;
@@ -989,15 +1035,29 @@ function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
   const toX = i => leftPad + (i / count) * chartW;
   const toY = v => padY + chartH - ((v - yMin) / ySpan) * chartH;
   const baseY = padY + chartH;
-  const linePts = valid.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
-  const areaPath = `${linePts.join(' ')} ${toX(valid[valid.length - 1].i).toFixed(1)},${baseY.toFixed(1)} ${toX(valid[0].i).toFixed(1)},${baseY.toFixed(1)}`;
   const hexToRgb = h => { const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h); return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '255,255,255'; };
   const rgb = hexToRgb(color);
-  // P3 2026-04-10: degraded/partial points rendered as hollow rings with lower opacity
-  const dots = valid.map(p => {
-    const isOk = !statuses || !statuses[p.i] || statuses[p.i] === 'ok';
-    if (isOk) return `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2" fill="${color}" opacity="0.9"/>`;
-    return `<circle cx="${toX(p.i).toFixed(1)}" cy="${toY(p.v).toFixed(1)}" r="2.5" fill="none" stroke="${color}" stroke-width="1" opacity="0.4"/>`
+
+  // Main polyline + area: primary points only
+  let mainLine = '', mainArea = '';
+  if (primary.length >= 2) {
+    const linePts = primary.map(p => `${toX(p.i).toFixed(1)},${toY(p.v).toFixed(1)}`);
+    mainLine = `<polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePts.join(' ')}"/>`;
+    const areaPath = `${linePts.join(' ')} ${toX(primary[primary.length - 1].i).toFixed(1)},${baseY.toFixed(1)} ${toX(primary[0].i).toFixed(1)},${baseY.toFixed(1)}`;
+    mainArea = `<polygon points="${areaPath}" fill="url(#sg-${rgb.replace(/,/g,'-')})"/>`;
+  } else if (primary.length === 1) {
+    mainLine = `<circle cx="${toX(primary[0].i).toFixed(1)}" cy="${toY(primary[0].v).toFixed(1)}" r="3" fill="${color}" opacity="0.9"/>`;
+  }
+
+  // Dots: only last primary point gets a filled dot; diagnostic points get hollow rings
+  let dots = '';
+  if (primary.length) {
+    const last = primary[primary.length - 1];
+    dots += `<circle cx="${toX(last.i).toFixed(1)}" cy="${toY(last.v).toFixed(1)}" r="2.5" fill="${color}" opacity="0.9"/>`;
+  }
+  dots += diagnostic.map(p => {
+    const cy = toY(Math.max(yMin, Math.min(yMax, p.v)));
+    return `<circle cx="${toX(p.i).toFixed(1)}" cy="${cy.toFixed(1)}" r="2.5" fill="none" stroke="${color}" stroke-width="1" opacity="0.3"/>`
       + `<title>${statuses[p.i]}</title>`;
   }).join('');
 
@@ -1036,8 +1096,8 @@ function sparklineSvg(values, color, w = 230, h = 60, timestamps, statuses) {
     <defs><linearGradient id="sg-${rgb.replace(/,/g,'-')}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.25"/><stop offset="100%" stop-color="${color}" stop-opacity="0.03"/></linearGradient></defs>
     ${gridLines}
     <line x1="${leftPad}" y1="${baseY.toFixed(1)}" x2="${(leftPad + chartW).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-    <polygon points="${areaPath}" fill="url(#sg-${rgb.replace(/,/g,'-')})"/>
-    <polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePts.join(' ')}"/>
+    ${mainArea}
+    ${mainLine}
     ${dots}
     ${yLabels}
     ${yTitle}
@@ -1190,6 +1250,25 @@ function _populatePobDetail(sd) {
   el.innerHTML = html;
 }
 
+function _populateXrecoDetail(sd) {
+  const el = $('detail-xreco');
+  if (!el) return;
+  let html = '<div class="detail-label">XReco Track — recommendation pushes</div>';
+  html += _detailRow('hits', sd.xreco_hits ?? '—');
+  html += _detailRow('pushes', sd.xreco_pushes ?? '—');
+  const hr = sd.xreco_hit_rate;
+  html += _detailRow('hit_rate', hr != null ? (typeof hr === 'number' ? (hr * 100).toFixed(1) + '%' : hr) : '—');
+  html += _detailRow('weight in TAS_social', '0.25');
+  el.innerHTML = html;
+  // sync static ids too
+  const hitsEl = $('cc-xreco-hits');
+  if (hitsEl) hitsEl.textContent = sd.xreco_hits ?? '—';
+  const pushesEl = $('cc-xreco-pushes');
+  if (pushesEl) pushesEl.textContent = sd.xreco_pushes ?? '—';
+  const hrEl = $('cc-xreco-hit-rate');
+  if (hrEl) hrEl.textContent = hr != null ? (typeof hr === 'number' ? (hr * 100).toFixed(1) + '%' : hr) : '—';
+}
+
 function _populatePortfolioNormDetail(td) {
   const el = $('detail-portfolio-norm');
   if (!el) return;
@@ -1247,17 +1326,21 @@ function renderTasCommandCenter(data) {
   const social = numericOrNull(tas.tas_social);
   const trade = numericOrNull(tas.tas_trade);
   const total = numericOrNull(tas.tas_total);
+  // Eligible points: status === 'ok' (or missing) with valid tas_total
+  const eligible = history.filter(p => (!p.status || p.status === 'ok') && p.history_eligible !== false && numericOrNull(p.tas_total) !== null);
+  const latestEligible = eligible.length ? eligible[eligible.length - 1] : null;
+  const prevEligible = eligible.length >= 2 ? eligible[eligible.length - 2] : null;
 
-  // Previous values from history
-  const prev = history.length >= 2 ? history[history.length - 2] : {};
+  // Center TAS: use latest eligible point if current is degraded
+  const displayTotal = (total !== null && (!tas.status || tas.status === 'ok')) ? total : (latestEligible ? numericOrNull(latestEligible.tas_total) : total);
 
   // Center column
   const ccTotal = $('cc-tas-total');
   if (ccTotal) {
-    ccTotal.textContent = total !== null ? fmt(total) : '—';
-    ccTotal.className = 'big-num jumbo ' + (total >= 1.5 ? 'clr-ok' : total >= 0.8 ? 'clr-warn' : 'clr-error');
+    ccTotal.textContent = displayTotal !== null ? fmt(displayTotal) : '—';
+    ccTotal.className = 'big-num jumbo ' + (displayTotal >= 1.5 ? 'clr-ok' : displayTotal >= 0.8 ? 'clr-warn' : 'clr-error');
   }
-  const trendT = trendArrow(total, numericOrNull(prev.tas_total));
+  const trendT = trendArrow(latestEligible ? numericOrNull(latestEligible.tas_total) : displayTotal, prevEligible ? numericOrNull(prevEligible.tas_total) : null);
   const trendTEl = $('cc-tas-total-trend');
   if (trendTEl) { trendTEl.textContent = trendT.arrow; trendTEl.className = 'trend-arrow ' + trendT.cls; }
 
@@ -1274,7 +1357,7 @@ function renderTasCommandCenter(data) {
   const sparkEl = $('cc-sparkline');
   let pts = [];
   if (sparkEl) {
-    const cutoffMs = Date.now() - 72 * 60 * 60 * 1000;
+    const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
     pts = history.filter(p => { try { return new Date(p.ts).getTime() >= cutoffMs; } catch { return false; } });
     if (pts.length < 5) pts = history.slice(-12);
     sparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_total), '#00d26a', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
@@ -1284,7 +1367,7 @@ function renderTasCommandCenter(data) {
   if (legendEl) {
     const degradedCount = pts.filter(p => p.status && p.status !== 'ok').length;
     legendEl.textContent = degradedCount > 0
-      ? (_lang === 'zh' ? `${degradedCount} 个降级/不完整数据点（空心圆），不参与趋势计算` : `${degradedCount} degraded/partial point(s) (hollow dots) excluded from trend`)
+      ? (_lang === 'zh' ? `${degradedCount} 个降级/不完整数据点（空心圆），不参与主线、趋势和 y 轴范围` : `${degradedCount} degraded/partial point(s) (hollow dots) excluded from main line, trend & y-axis`)
       : '';
   }
 
@@ -1294,14 +1377,15 @@ function renderTasCommandCenter(data) {
     ccSocial.textContent = social !== null ? fmt(social) : '—';
     ccSocial.className = 'big-num ' + (social >= 1.5 ? 'clr-ok' : social >= 0.8 ? 'clr-warn' : 'clr-error');
   }
-  const trendS = trendArrow(social, numericOrNull(prev.tas_social));
+  const trendS = trendArrow(social, prevEligible ? numericOrNull(prevEligible.tas_social) : null);
   const trendSEl = $('cc-tas-social-trend');
   if (trendSEl) { trendSEl.textContent = trendS.arrow; trendSEl.className = 'trend-arrow small ' + trendS.cls; }
 
   setText('cc-align-score', fmt(numericOrNull(socialDetail.align_score)));
   setText('cc-community-score', fmt(numericOrNull(socialDetail.community_score)));
+  setText('cc-xreco-score', fmt(numericOrNull(socialDetail.xreco_score)));
   setText('cc-pob-score', fmt(numericOrNull(socialDetail.pob_reward_score != null ? socialDetail.pob_reward_score : socialDetail.curate_reward_score)));
-  setText('cc-social-formula', socialDetail.formula || 'TAS_social = 0.5×align + 0.2×community + 0.3×pob×5');
+  setText('cc-social-formula', socialDetail.formula || 'TAS_social = 0.5×align + 0.25×community + 0.25×xreco');
   // Track B source explainer
   const tbDetail = socialDetail.track_b_detail || {};
   const tbSrcEl = $('cc-trackb-source');
@@ -1313,18 +1397,25 @@ function renderTasCommandCenter(data) {
   // ── TAS_social detail panes ──
   _populateAlignDetail(socialDetail);
   _populateCommunityDetail(socialDetail);
+  _populateXrecoDetail(socialDetail);
   _populatePobDetail(socialDetail);
 
-  // TAS_social sparkline (same style as Aggregated TAS)
+  // TAS_social sparkline — use TAS_social-specific status, not aggregate TAS status.
   const socialSparkEl = $('cc-social-sparkline');
   if (socialSparkEl && pts.length) {
-    socialSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_social), '#58a6ff', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
+    const socialStatuses = pts.map(p => {
+      if (p.tas_social_status) return p.tas_social_status;
+      // Legacy fallback: if TAS_social has a numeric value, treat it as its own valid point
+      // even when aggregate TAS was degraded only because TAS_trade was unavailable.
+      return numericOrNull(p.tas_social) !== null ? 'ok' : (p.status || 'ok');
+    });
+    socialSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_social), '#58a6ff', 300, 70, pts.map(p => p.ts), socialStatuses);
   }
   // P4 2026-04-10: explain TAS_social flat lines — when the last N points have identical values,
   // the 24h rolling window likely has no new owner-interaction delta.
   const flatNoteEl = $('cc-social-flat-note');
   if (flatNoteEl) {
-    const socialVals = pts.map(p => numericOrNull(p.tas_social)).filter(v => v !== null);
+    const socialVals = pts.filter(p => !p.status || p.status === 'ok').map(p => numericOrNull(p.tas_social)).filter(v => v !== null);
     const tailLen = Math.min(socialVals.length, 5);
     const tail = socialVals.slice(-tailLen);
     const isFlat = tailLen >= 3 && tail.every(v => v === tail[0]);
@@ -1345,7 +1436,7 @@ function renderTasCommandCenter(data) {
     ccTrade.textContent = trade !== null ? (fmt(trade) + (_tradeIsDegraded ? ' ⚠' : '')) : '—';
     ccTrade.className = 'big-num ' + (trade >= 1.5 ? 'clr-ok' : trade >= 0.8 ? 'clr-warn' : 'clr-error') + (_tradeIsDegraded ? ' degraded' : '');
   }
-  const trendTr = trendArrow(trade, numericOrNull(prev.tas_trade));
+  const trendTr = trendArrow(trade, prevEligible ? numericOrNull(prevEligible.tas_trade) : null);
   const trendTrEl = $('cc-tas-trade-trend');
   if (trendTrEl) { trendTrEl.textContent = trendTr.arrow; trendTrEl.className = 'trend-arrow small ' + trendTr.cls; }
 
@@ -1360,10 +1451,14 @@ function renderTasCommandCenter(data) {
   _populateClaimableNormDetail(tradeD);
   _populatePobRewardDetail(tradeD);
 
-  // TAS_trade sparkline (same style as Aggregated TAS)
+  // TAS_trade sparkline — use TAS_trade-specific status.
   const tradeSparkEl = $('cc-trade-sparkline');
   if (tradeSparkEl && pts.length) {
-    tradeSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_trade), '#f0a500', 300, 70, pts.map(p => p.ts), pts.map(p => p.status || 'ok'));
+    const tradeStatuses = pts.map(p => {
+      if (p.tas_trade_status) return p.tas_trade_status;
+      return numericOrNull(p.tas_trade) !== null ? (p.status || 'ok') : 'missing';
+    });
+    tradeSparkEl.innerHTML = sparklineSvg(pts.map(p => p.tas_trade), '#f0a500', 300, 70, pts.map(p => p.ts), tradeStatuses);
   }
 }
 
@@ -1490,7 +1585,7 @@ function renderBookmarkerTab(bm) {
   const kwEl = $('bm-keywords');
   if (kwEl) {
     const kws = brief.keywords || [];
-    kwEl.innerHTML = kws.slice(0, 8).map(k => `<span class="tag">${escHtml(k)}</span>`).join('');
+    kwEl.innerHTML = kws.slice(0, 8).map(k => `<span class="tag">${escHtml(typeof k === 'string' ? k : k.term || JSON.stringify(k))}</span>`).join('');
   }
 
   const rawCandidates = cands.candidates || cands.items || brief.candidates || [];
@@ -1515,7 +1610,12 @@ function renderBookmarkerTab(bm) {
   const draftsEl = $('bm-drafts-list');
   if (draftsEl) {
     if (!drafts.length) {
-      draftsEl.innerHTML = '<div class="muted small">No drafts</div>';
+      const moveCount = ((draftsObj.meta || {}).social_move_count || 0);
+      const draftStatus = draftsObj.status || '';
+      const emptyLabel = (draftStatus === 'stale' && moveCount > 0)
+        ? 'No queued drafts (already consumed / executed)'
+        : 'No drafts';
+      draftsEl.innerHTML = `<div class="muted small">${escHtml(emptyLabel)}</div>`;
     } else {
       draftsEl.innerHTML = drafts.map(d => {
         const txt = (d.text || '').slice(0, 100) + ((d.text || '').length > 100 ? '…' : '');
@@ -1557,9 +1657,9 @@ function renderBookmarkerTab(bm) {
   }
   const pipeTopic = $('bm-pipe-detail-topic_brief');
   if (pipeTopic) {
-    const kws = [...new Set(brief.keywords || [])].slice(0, 4);
+    const kws = (brief.keywords || []).slice(0, 4);
     pipeTopic.innerHTML = `<div class="text-block pipeline-blurb">${escHtml(brief.headline || brief.summary || '—')}</div>
-      ${kws.length ? `<div class="tags-row compact-tags">${kws.map(k => `<span class="tag">${escHtml(k)}</span>`).join('')}</div>` : ''}`;
+      ${kws.length ? `<div class="tags-row compact-tags">${kws.map(k => `<span class="tag">${escHtml(typeof k === 'string' ? k : k.term || JSON.stringify(k))}</span>`).join('')}</div>` : ''}`;
   }
   const pipeCands = $('bm-pipe-detail-content_candidates');
   if (pipeCands) {
@@ -1577,7 +1677,11 @@ function renderBookmarkerTab(bm) {
     const dObj = bm.social_drafts || {};
     const dList = dObj.drafts || [];
     if (!dList.length) {
-      pipeDrafts.innerHTML = '<div class="muted small">No drafts</div>';
+      const moveCount = ((dObj.meta || {}).social_move_count || 0);
+      const emptyLabel = (dObj.status === 'stale' && moveCount > 0)
+        ? 'Draft queue empty (work already consumed)'
+        : 'No drafts';
+      pipeDrafts.innerHTML = `<div class="muted small">${escHtml(emptyLabel)}</div>`;
     } else {
       pipeDrafts.innerHTML = renderMiniFeed(dList.map(d => ({
         title: (d.text || '').slice(0, 72) + ((d.text || '').length > 72 ? '…' : ''),
@@ -1624,7 +1728,7 @@ function renderTraderTab(trader) {
       balEl.innerHTML = addressRow + totalRow + rows;
     } else {
       const bals = wallet.balances || {};
-      const items = Object.entries(bals).map(([tick, amt]) => ({ title: tick, right: fmtNum(parseFloat(amt)) }));
+      const items = Object.entries(bals).map(([tick, amt]) => ({ title: tick, right: fmtNum(amt) }));
       const balanceHtml = items.length ? listHtml(items) : `<div class="muted small">${t('no-balance')}</div>`;
       balEl.innerHTML = addressRow + balanceHtml;
     }
@@ -1637,26 +1741,44 @@ function renderTraderTab(trader) {
     if (!claimable.length) {
       rewEl.innerHTML = `<div class="muted small">${t('no-rewards')}</div>`;
     } else {
-      rewEl.innerHTML = listHtml(claimable.map(r => ({
-        title: r.tick,
-        sub: r.status || r.action || '',
-        right: `${fmtNum(r.claimable_amount)} ($${fmt(r.reward_value_usd)})`,
-      })));
+      rewEl.innerHTML = listHtml(claimable.map(r => {
+        const usdVal = r.usd_value ?? r.reward_value_usd;
+        const amtVal = r.amount ?? r.claimable_amount;
+        const usdLabel = isMissingNumeric(usdVal) ? 'price unavailable' : `$${fmt(usdVal)}`;
+        return {
+          title: r.tick,
+          sub: r.status || r.action || '',
+          right: `${fmtNum(amtVal)} (${usdLabel})`,
+        };
+      }));
     }
   }
 
   // Claimable big + threshold bar
   const claimBig = $('trader-claimable-big');
   if (claimBig) {
-    const usd = tasT.claimable_usd_raw;
-    claimBig.textContent = usd != null ? '$' + fmt(usd) : '—';
-    claimBig.className = 'v mono bold ' + (usd >= 2 ? 'clr-ok' : 'clr-warn');
+    const claimable = rewards.claimable || [];
+    const hasUnpricedClaimable = claimable.some(r => !isMissingNumeric(r.amount ?? r.claimable_amount) && isMissingNumeric(r.usd_value ?? r.reward_value_usd));
+    const usd = !isMissingNumeric(tasT.claimable_usd_raw) ? tasT.claimable_usd_raw : rewards.claimable_usd_total;
+    if (hasUnpricedClaimable && (!usd || parseFloat(usd) === 0)) {
+      claimBig.textContent = '—';
+      claimBig.className = 'v mono bold clr-warn';
+    } else {
+      claimBig.textContent = !isMissingNumeric(usd) ? '$' + fmt(usd) : '—';
+      claimBig.className = 'v mono bold ' + (parseFloat(usd || 0) >= 2 ? 'clr-ok' : 'clr-warn');
+    }
   }
   const claimBar = $('trader-claim-progress');
   if (claimBar) {
-    const usd = tasT.claimable_usd_raw || 0;
-    const pct = Math.min(100, (usd / 2) * 100);
-    claimBar.innerHTML = `<div class="pob-bar-fill ${pct >= 100 ? 'pob-bar-green' : 'pob-bar-yellow'}" style="width:${pct.toFixed(1)}%"></div>`;
+    const claimable = rewards.claimable || [];
+    const hasUnpricedClaimable = claimable.some(r => !isMissingNumeric(r.amount ?? r.claimable_amount) && isMissingNumeric(r.usd_value ?? r.reward_value_usd));
+    const usd = !isMissingNumeric(tasT.claimable_usd_raw) ? parseFloat(tasT.claimable_usd_raw) : parseFloat(rewards.claimable_usd_total || 0);
+    if (hasUnpricedClaimable && (!usd || Number.isNaN(usd))) {
+      claimBar.innerHTML = `<div class="muted small">USD unavailable</div>`;
+    } else {
+      const pct = Math.min(100, (usd / 2) * 100);
+      claimBar.innerHTML = `<div class="pob-bar-fill ${pct >= 100 ? 'pob-bar-green' : 'pob-bar-yellow'}" style="width:${pct.toFixed(1)}%"></div>`;
+    }
   }
 
   // Risk flags
@@ -3216,38 +3338,70 @@ function _renderExplainEvents(events) {
 // Main fetch loop
 // ══════════════════════════════════════════════════════════════════════════
 async function fetchAll() {
+  const errors = [];
+  let status = _lastStatus;
+  let timeline = _lastTimeline;
+
   try {
-    const [status, timeline, autoresearch, controlTower, agentHealth, noc, explainability] = await Promise.all([
-      fetchJSON('/api/status'),
-      fetchJSON('/api/timeline'),
-      fetchJSON('/api/autoresearch').catch(() => null),
-      fetchJSON('/api/control-tower').catch(() => null),
-      fetchJSON('/api/agent-health').catch(() => null),
-      fetchJSON('/api/noc').catch(() => null),
-      fetchJSON('/api/explainability').catch(() => null),
-    ]);
+    status = await fetchJSON('/api/status');
     _lastStatus = status;
-    _lastTimeline = timeline;
-    _lastAutoResearch = autoresearch;
-    _lastControlTower = controlTower;
-    _lastAgentHealth = agentHealth;
-    _lastNoc = noc;
-    _lastExplainability = explainability;
-    renderStatus(status);
-    renderTimeline(timeline);
-    if (autoresearch) renderAutoResearch(autoresearch);
-    if (controlTower) renderControlTower(controlTower);
-    if (agentHealth) renderAgentHealth(agentHealth);
-    if (noc) renderNoc(noc);
-    if (explainability) renderExplainability(explainability);
-    renderHeroBar(controlTower, timeline, agentHealth, status);
-    renderNextPostPreview(status);
-    translateDomTextNodes();
-    // renderAgentQuickCards removed (cards deleted from UI)
   } catch (e) {
-    showError(t('fetch-error') + e.message);
-    console.error(e);
+    errors.push(`/api/status: ${e.message}`);
   }
+
+  try {
+    timeline = await fetchJSON('/api/timeline');
+    _lastTimeline = timeline;
+  } catch (e) {
+    errors.push(`/api/timeline: ${e.message}`);
+  }
+
+  const [
+    autoresearch,
+    controlTower,
+    agentHealth,
+    noc,
+    explainability,
+  ] = await Promise.all([
+    fetchOptionalJSON('/api/autoresearch', _lastAutoResearch),
+    fetchOptionalJSON('/api/control-tower', _lastControlTower),
+    fetchOptionalJSON('/api/agent-health', _lastAgentHealth),
+    fetchOptionalJSON('/api/noc', _lastNoc),
+    fetchOptionalJSON('/api/explainability', _lastExplainability),
+  ]);
+
+  _lastAutoResearch = autoresearch;
+  _lastControlTower = controlTower;
+  _lastAgentHealth = agentHealth;
+  _lastNoc = noc;
+  _lastExplainability = explainability;
+
+  if (!status && !timeline) {
+    const msg = errors[0] || t('fetch-error');
+    showError(t('fetch-error') + msg);
+    console.error('dashboard fetch failed:', errors);
+    return;
+  }
+
+  if (status) renderStatus(status);
+  if (timeline) renderTimeline(timeline);
+  if (autoresearch) renderAutoResearch(autoresearch);
+  if (controlTower) renderControlTower(controlTower);
+  if (agentHealth) renderAgentHealth(agentHealth);
+  if (noc) renderNoc(noc);
+  if (explainability) renderExplainability(explainability);
+  renderHeroBar(controlTower, timeline, agentHealth, status);
+  renderNextPostPreview(status);
+  translateDomTextNodes();
+
+  if (errors.length) {
+    showError(langText(
+      '部分数据刷新失败，已显示最近一次可用结果',
+      'Partial refresh failed; showing the latest available data',
+    ));
+    console.warn('dashboard partial fetch errors:', errors);
+  }
+  // renderAgentQuickCards removed (cards deleted from UI)
 }
 
 // Auto-refresh every 30 seconds
