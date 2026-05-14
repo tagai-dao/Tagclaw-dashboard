@@ -1250,6 +1250,25 @@ function _populatePobDetail(sd) {
   el.innerHTML = html;
 }
 
+function _populateXrecoDetail(sd) {
+  const el = $('detail-xreco');
+  if (!el) return;
+  let html = '<div class="detail-label">XReco Track — recommendation pushes</div>';
+  html += _detailRow('hits', sd.xreco_hits ?? '—');
+  html += _detailRow('pushes', sd.xreco_pushes ?? '—');
+  const hr = sd.xreco_hit_rate;
+  html += _detailRow('hit_rate', hr != null ? (typeof hr === 'number' ? (hr * 100).toFixed(1) + '%' : hr) : '—');
+  html += _detailRow('weight in TAS_social', '0.25');
+  el.innerHTML = html;
+  // sync static ids too
+  const hitsEl = $('cc-xreco-hits');
+  if (hitsEl) hitsEl.textContent = sd.xreco_hits ?? '—';
+  const pushesEl = $('cc-xreco-pushes');
+  if (pushesEl) pushesEl.textContent = sd.xreco_pushes ?? '—';
+  const hrEl = $('cc-xreco-hit-rate');
+  if (hrEl) hrEl.textContent = hr != null ? (typeof hr === 'number' ? (hr * 100).toFixed(1) + '%' : hr) : '—';
+}
+
 function _populatePortfolioNormDetail(td) {
   const el = $('detail-portfolio-norm');
   if (!el) return;
@@ -1307,7 +1326,6 @@ function renderTasCommandCenter(data) {
   const social = numericOrNull(tas.tas_social);
   const trade = numericOrNull(tas.tas_trade);
   const total = numericOrNull(tas.tas_total);
-
   // Eligible points: status === 'ok' (or missing) with valid tas_total
   const eligible = history.filter(p => (!p.status || p.status === 'ok') && p.history_eligible !== false && numericOrNull(p.tas_total) !== null);
   const latestEligible = eligible.length ? eligible[eligible.length - 1] : null;
@@ -1365,8 +1383,9 @@ function renderTasCommandCenter(data) {
 
   setText('cc-align-score', fmt(numericOrNull(socialDetail.align_score)));
   setText('cc-community-score', fmt(numericOrNull(socialDetail.community_score)));
+  setText('cc-xreco-score', fmt(numericOrNull(socialDetail.xreco_score)));
   setText('cc-pob-score', fmt(numericOrNull(socialDetail.pob_reward_score != null ? socialDetail.pob_reward_score : socialDetail.curate_reward_score)));
-  setText('cc-social-formula', socialDetail.formula || 'TAS_social = 0.5×align + 0.2×community + 0.3×pob×5');
+  setText('cc-social-formula', socialDetail.formula || 'TAS_social = 0.5×align + 0.25×community + 0.25×xreco');
   // Track B source explainer
   const tbDetail = socialDetail.track_b_detail || {};
   const tbSrcEl = $('cc-trackb-source');
@@ -1378,6 +1397,7 @@ function renderTasCommandCenter(data) {
   // ── TAS_social detail panes ──
   _populateAlignDetail(socialDetail);
   _populateCommunityDetail(socialDetail);
+  _populateXrecoDetail(socialDetail);
   _populatePobDetail(socialDetail);
 
   // TAS_social sparkline — use TAS_social-specific status, not aggregate TAS status.
@@ -1565,7 +1585,7 @@ function renderBookmarkerTab(bm) {
   const kwEl = $('bm-keywords');
   if (kwEl) {
     const kws = brief.keywords || [];
-    kwEl.innerHTML = kws.slice(0, 8).map(k => `<span class="tag">${escHtml(k)}</span>`).join('');
+    kwEl.innerHTML = kws.slice(0, 8).map(k => `<span class="tag">${escHtml(typeof k === 'string' ? k : k.term || JSON.stringify(k))}</span>`).join('');
   }
 
   const rawCandidates = cands.candidates || cands.items || brief.candidates || [];
@@ -1637,9 +1657,9 @@ function renderBookmarkerTab(bm) {
   }
   const pipeTopic = $('bm-pipe-detail-topic_brief');
   if (pipeTopic) {
-    const kws = [...new Set(brief.keywords || [])].slice(0, 4);
+    const kws = (brief.keywords || []).slice(0, 4);
     pipeTopic.innerHTML = `<div class="text-block pipeline-blurb">${escHtml(brief.headline || brief.summary || '—')}</div>
-      ${kws.length ? `<div class="tags-row compact-tags">${kws.map(k => `<span class="tag">${escHtml(k)}</span>`).join('')}</div>` : ''}`;
+      ${kws.length ? `<div class="tags-row compact-tags">${kws.map(k => `<span class="tag">${escHtml(typeof k === 'string' ? k : k.term || JSON.stringify(k))}</span>`).join('')}</div>` : ''}`;
   }
   const pipeCands = $('bm-pipe-detail-content_candidates');
   if (pipeCands) {
@@ -1722,11 +1742,13 @@ function renderTraderTab(trader) {
       rewEl.innerHTML = `<div class="muted small">${t('no-rewards')}</div>`;
     } else {
       rewEl.innerHTML = listHtml(claimable.map(r => {
-        const usdLabel = isMissingNumeric(r.reward_value_usd) ? 'price unavailable' : `$${fmt(r.reward_value_usd)}`;
+        const usdVal = r.usd_value ?? r.reward_value_usd;
+        const amtVal = r.amount ?? r.claimable_amount;
+        const usdLabel = isMissingNumeric(usdVal) ? 'price unavailable' : `$${fmt(usdVal)}`;
         return {
           title: r.tick,
           sub: r.status || r.action || '',
-          right: `${fmtNum(r.claimable_amount)} (${usdLabel})`,
+          right: `${fmtNum(amtVal)} (${usdLabel})`,
         };
       }));
     }
@@ -1736,7 +1758,7 @@ function renderTraderTab(trader) {
   const claimBig = $('trader-claimable-big');
   if (claimBig) {
     const claimable = rewards.claimable || [];
-    const hasUnpricedClaimable = claimable.some(r => !isMissingNumeric(r.claimable_amount) && isMissingNumeric(r.reward_value_usd));
+    const hasUnpricedClaimable = claimable.some(r => !isMissingNumeric(r.amount ?? r.claimable_amount) && isMissingNumeric(r.usd_value ?? r.reward_value_usd));
     const usd = !isMissingNumeric(tasT.claimable_usd_raw) ? tasT.claimable_usd_raw : rewards.claimable_usd_total;
     if (hasUnpricedClaimable && (!usd || parseFloat(usd) === 0)) {
       claimBig.textContent = '—';
@@ -1749,7 +1771,7 @@ function renderTraderTab(trader) {
   const claimBar = $('trader-claim-progress');
   if (claimBar) {
     const claimable = rewards.claimable || [];
-    const hasUnpricedClaimable = claimable.some(r => !isMissingNumeric(r.claimable_amount) && isMissingNumeric(r.reward_value_usd));
+    const hasUnpricedClaimable = claimable.some(r => !isMissingNumeric(r.amount ?? r.claimable_amount) && isMissingNumeric(r.usd_value ?? r.reward_value_usd));
     const usd = !isMissingNumeric(tasT.claimable_usd_raw) ? parseFloat(tasT.claimable_usd_raw) : parseFloat(rewards.claimable_usd_total || 0);
     if (hasUnpricedClaimable && (!usd || Number.isNaN(usd))) {
       claimBar.innerHTML = `<div class="muted small">USD unavailable</div>`;

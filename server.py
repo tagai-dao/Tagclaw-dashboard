@@ -835,14 +835,17 @@ def _load_tas_history(limit: int = 50, strategy_cycle_count: int | None = None, 
                             "tas_total": _to_float(obj.get("tas_total")),
                             "tas_social": _to_float(obj.get("tas_social")),
                             "tas_trade": _to_float(obj.get("tas_trade")),
+                            "tas_xreco": _to_float(obj.get("tas_xreco")),
                             "cycle_count": _to_int(obj.get("cycle_count")),
                             # P3 2026-04-10: pass status metadata for chart rendering
                             "status": obj.get("status", "ok"),
                             "tas_social_status": obj.get("tas_social_status"),
                             "tas_trade_status": obj.get("tas_trade_status"),
+                            "tas_xreco_status": obj.get("tas_xreco_status"),
                             "history_eligible": obj.get("history_eligible", True),
                             "tas_social_history_eligible": obj.get("tas_social_history_eligible"),
                             "tas_trade_history_eligible": obj.get("tas_trade_history_eligible"),
+                            "tas_xreco_history_eligible": obj.get("tas_xreco_history_eligible"),
                         })
                 except Exception:
                     continue
@@ -1474,7 +1477,7 @@ def _build_bookmarker_social_pipeline(
             {
                 "id": "autonomy_intent",
                 "label": "Autonomy Intent",
-                "status": "active" if ai_mode in ("standard", "active") else ("hold" if ai_mode == "conservative" else "unknown"),
+                "status": "active" if ai_mode in ("standard", "active", "native-auto") else ("hold" if ai_mode in ("conservative", "observe") else "unknown"),
                 "data": {
                     "mode": ai_mode,
                     "reason": ai_reason[:120],
@@ -1703,6 +1706,7 @@ def api_status():
     write_state  = _safe("shared/social-write-state.json")      or {}
     tas_social_data = _safe("bookmarker/tas-social.json")       or {}
     tas_social_main = _safe("main/tas-social.json")              or {}
+    tas_xreco_data  = _safe("bookmarker/tas-xreco.json")        or {}
 
     # ── Trader ──
     wallet   = _safe("trader/wallet-snapshot.json") or {}
@@ -1799,6 +1803,10 @@ def api_status():
                 "track_a_detail":      tas_social_data.get("track_a_detail"),
                 "track_c_detail":      tas_social_data.get("track_c_detail"),
                 "comparison":          tas_social_data.get("comparison"),
+                "xreco_score":         tas_social_data.get("xreco_score"),
+                "xreco_hits":          tas_xreco_data.get("hits"),
+                "xreco_pushes":        tas_xreco_data.get("pushes"),
+                "xreco_hit_rate":      tas_xreco_data.get("hit_rate"),
                 "eligible_posts":      (tas_social_main.get("inputs") or {}).get("eligible_posts"),
                 "align_signals":       tas_social_data.get("track_a_detail", {}).get("raw_align") if tas_social_data.get("track_a_detail") else (tas_social_main.get("inputs") or {}).get("align_signals"),
                 "post_interaction_details": (tas_social_main.get("inputs") or {}).get("post_interaction_details"),

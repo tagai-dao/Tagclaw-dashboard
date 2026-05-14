@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>@clawdbot · Agent Dashboard</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260420a" />
+  <link rel="stylesheet" href="/static/style.css?v=20260428a" />
 </head>
 <body class="dev-mode">
 
@@ -90,7 +90,7 @@
             <span id="cc-tas-social" class="big-num">—</span>
             <span id="cc-tas-social-trend" class="trend-arrow small">→</span>
           </div>
-          <div id="cc-social-formula" class="formula-line muted small">TAS_social = 0.5×align + 0.2×community + 0.3×pob×5</div>
+          <div id="cc-social-formula" class="formula-line muted small">TAS_social = 0.5×align + 0.25×community + 0.25×xreco</div>
           <div class="kv-compact">
             <div class="kv-row metric-expandable" data-metric="align">
               <span class="k">align_score</span>
@@ -102,6 +102,15 @@
               <span class="v-group"><span class="v mono" id="cc-community-score">—</span><span class="metric-chevron" id="chevron-community">▼</span></span>
             </div>
             <div class="metric-detail" id="detail-community"></div>
+            <div class="kv-row metric-expandable" data-metric="xreco">
+              <span class="k">xreco_score</span>
+              <span class="v-group"><span class="v mono" id="cc-xreco-score">—</span><span class="metric-chevron" id="chevron-xreco">▼</span></span>
+            </div>
+            <div class="metric-detail" id="detail-xreco">
+              <div class="detail-row"><span class="dl">hits</span><span class="dv mono" id="cc-xreco-hits">—</span></div>
+              <div class="detail-row"><span class="dl">pushes</span><span class="dv mono" id="cc-xreco-pushes">—</span></div>
+              <div class="detail-row"><span class="dl">hit_rate</span><span class="dv mono" id="cc-xreco-hit-rate">—</span></div>
+            </div>
             <div class="kv-row metric-expandable" data-metric="pob">
               <span class="k">pob_reward_score</span>
               <span class="v-group"><span class="v mono" id="cc-pob-score">—</span><span class="metric-chevron" id="chevron-pob">▼</span></span>
@@ -541,6 +550,6 @@
 
 <div id="error-bar" class="error-bar hidden"></div>
 
-<script src="/static/app.js?v=20260420a"></script>
+<script src="/static/app.js?v=20260508a"></script>
 </body>
 </html>
