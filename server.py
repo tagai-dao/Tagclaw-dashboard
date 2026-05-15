@@ -1803,7 +1803,7 @@ def api_status():
                 "track_a_detail":      tas_social_data.get("track_a_detail"),
                 "track_c_detail":      tas_social_data.get("track_c_detail"),
                 "comparison":          tas_social_data.get("comparison"),
-                "xreco_score":         tas_social_data.get("xreco_score"),
+                "xreco_score":         tas_xreco_data.get("value"),
                 "xreco_hits":          tas_xreco_data.get("hits"),
                 "xreco_pushes":        tas_xreco_data.get("pushes"),
                 "xreco_hit_rate":      tas_xreco_data.get("hit_rate"),
